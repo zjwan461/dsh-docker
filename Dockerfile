@@ -233,30 +233,30 @@ RUN npm install --global --no-fund --no-audit \
       "@deepseek-ai/dsh-session-title-llm@${DSH_VERSION}" \
       pnpm
 
-# ── why those extra pins exist ──────────────────────────────────────────────
-# PRERELEASE RANGES FLOAT, and that broke a deployment. `@deepseek-ai/dsh@0.1.5-rc.1`
-# depends on `@deepseek-ai/dsh-base@^0.1.5-rc.1`, and npm resolves the NEWEST
-# prerelease inside that range — dsh-base 0.1.5-rc.3 in practice — while the CLI
-# stays rc.1. The newer bundle declares its sandbox packages at `^0.1.5-rc.3`, and
-# three of them ended up absent from the tree:
+# ── why no bundle pins here ─────────────────────────────────────────────────
+# An earlier revision ALSO installed dsh-base / dsh-sandbox-local /
+# dsh-bash-sandbox / dsh-fs-sandbox at the top level, to stop prerelease ranges
+# from floating. That cure was worse than the disease: a top-level install lands
+# at the npm global ROOT while the CLI's own dependencies nest under
+# <cli>/node_modules, so the same package ends up on disk TWICE. Anything keyed by
+# module or context IDENTITY then breaks, and it breaks in ways that never mention
+# duplicates:
 #
-#     @deepseek-ai/dsh-bash-sandbox   ^0.1.5-rc.3  MISSING
-#     @deepseek-ai/dsh-fs-sandbox     ^0.1.5-rc.3  MISSING
-#     @deepseek-ai/dsh-sandbox-local  ^0.1.5-rc.3  MISSING
+#     Agent preset binding requires a scoped context       (scope keys are
+#                                                          identity-compared objects)
+#     dsh: profile reload requires the root Include entry   (the booted root Include
+#                                                          entry lives in a WeakMap
+#                                                          keyed by the root context)
 #
-# The web profile then asks to load a plugin the installation does not carry, and
-# because the profile's own package.json declares no dependencies there is nothing
-# that can fill the gap — the GUI dies on every start with
-#     plugin(s) failed to load: @deepseek-ai/dsh-sandbox-local; could not be resolved
+# Prerelease float is defeated by CHOOSING THE NEWEST RELEASE OF ITS LINE instead:
+# a range can only float when a newer release exists, and semver keeps
+# `^0.2.0-rc.2` inside the 0.2.0 tuple, so 0.2.1-alpha.x cannot be pulled in. See
+# the DSH_VERSION note in .env.example.
 #
-# A TOP-LEVEL EXACT PIN defeats the float: the range is satisfied by the pinned
-# version instead of by the newest prerelease. That is the same mechanism that
-# makes the @deepseek-ai/dsh-session-title-llm pin above work, and it is why every
-# entry here is spelled out rather than left to a range.
-#
-# If one of these pins has no published version, the BUILD fails with npm's
-# "No matching version found" — which is the honest answer, and the fix at that
-# point is to move DSH_VERSION to a release whose whole tree is consistent.
+# The @deepseek-ai/dsh-session-title-llm pin above stays for an unrelated reason:
+# its `latest` dist-tag is a stale 0.0.1-rc.1, so leaving it unpinned would fetch a
+# release that does not match the CLI. That one is a peer of a nested plugin, so
+# installing it at the top level is what makes it resolvable at all.
 
 # ── persistent roots ────────────────────────────────────────────────────────
 # /data/dsh   every piece of GUI state (profiles, sessions, storages,
