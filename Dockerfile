@@ -356,88 +356,59 @@ RUN set -eux; \
     echo 'npm CLI composed the web profile: every plugin import resolved'; \
     rm -rf /tmp/dsh-build-check
 
-# ── pre-installed web profile ───────────────────────────────────────────────
-# The profile's plugins are NOT dependencies of the npm CLI. dsh installs them
-# with pnpm into $DSH_HOME/profiles on FIRST BOOT (installFailLoud), which makes
-# the first start depend on three things that are outside this image's control:
+# ── profile plugins are NOT installed here ──────────────────────────────────
+# An earlier revision of this file pre-installed the profile with
+# `dsh plugin --profile web install`, and the build disproved it:
+#     Already up to date
+#     Done in 919ms using pnpm v12.11.2
+# The profile's package.json declares NO dependencies (`dependencies: {}`). Its
+# plugin set is named by `dsh.profile.bundles` and materialised AT BOOT as a
+# projection of the installation's own packages — dsh-app-boot describes it as
+# wiring "the installation and selected bundles to Node's ESM and CommonJS
+# resolvers", and it only installs what "the installation does not supply".
 #
-#   * the npm registry being reachable FROM THE CONTAINER — dsh also installs a
-#     proxy from the environment (dsh-http-proxy installProxyFromEnvironment), so
-#     a container that inherits HTTP_PROXY/HTTPS_PROXY from the Docker client
-#     config can fail here even though the build was fine;
-#   * the runtime uid being able to write $DSH_HOME/profiles (a home directory
-#     migrated from a volume owned by a different uid is a real case);
-#   * a partial install never being retried cleanly — the half-written tree is
-#     what produces "plugin(s) failed to load: @deepseek-ai/dsh-sandbox-local;
-#     could not be resolved" and a restart loop.
-#
-# Installing here moves that work to where the network is known good (the same
-# network the npm install above already used). entrypoint.sh seeds the result
-# into $DSH_HOME on first start, and repairs an incomplete tree.
-#
-# Build with --build-arg INSTALL_PROFILE=0 to skip it and let dsh install at
-# runtime instead.
-ARG INSTALL_PROFILE=1
-RUN set -eux; \
-    if [ "${INSTALL_PROFILE}" = "1" ]; then \
-      DSH_NPM_BIN="$(cat /tmp/dsh-npm-bin.path)"; \
-      mkdir -p /opt/dsh-profile; \
-      DSH_HOME=/opt/dsh-profile node "${DSH_NPM_BIN}" --profile web --dump-config >/dev/null; \
-      DSH_HOME=/opt/dsh-profile node "${DSH_NPM_BIN}" plugin --profile web install; \
-      test -f /opt/dsh-profile/profiles/node_modules/@deepseek-ai/dsh-client-connection/lib/client.js; \
-      test -d /opt/dsh-profile/profiles/node_modules/@deepseek-ai/dsh-sandbox-local; \
-      echo "pre-installed profile packages: $(ls /opt/dsh-profile/profiles/node_modules/@deepseek-ai | wc -l)"; \
-    else \
-      echo 'INSTALL_PROFILE=0: the profile is installed at runtime, which needs npm registry access from the container'; \
-    fi
+# Two consequences:
+#   * nothing needs the npm registry at runtime, so there is nothing to bake;
+#   * a STALE projection is fatal. A profiles/node_modules carried over from an
+#     older home (a volume migrated with `cp -a` keeps the old owner) shadows the
+#     installation, and because the profile declares no dependencies NOTHING ever
+#     rebuilds it — so plugin resolution fails with "plugin(s) failed to load:
+#     … could not be resolved" on every restart, and a chown does not help.
+#     entrypoint.sh recognises that shape and says how to clear it.
 
-# ── deployment patch (on the pre-installed copy) ────────────────────────────
-# With the profile baked in, the patch goes back to build time and an anchor
-# mismatch fails the BUILD — the guarantee that was lost when this had to move to
-# container start. The entrypoint still re-applies it at runtime, which covers
-# the INSTALL_PROFILE=0 case and a profile repaired or reinstalled later.
-RUN set -eux; \
-    if [ -d /opt/dsh-profile/profiles/node_modules ]; then \
-      node /usr/local/bin/dsh-patch-client-settings.mjs --root /opt/dsh-profile/profiles; \
-    else \
-      echo 'no pre-installed profile: the patch will be applied by entrypoint.sh'; \
-    fi
+# ── deployment patch ────────────────────────────────────────────────────────
+# Applied by entrypoint.sh at start, NOT here: the profile — and therefore the
+# client bundle this rewrites — only exists once dsh has projected it into
+# $DSH_HOME at boot. See the note above.
 
 # ── boot smoke test ─────────────────────────────────────────────────────────
-# The only check that proves the GUI can actually start. `--dump-config` composes
-# the config tree but does NOT import the plugin modules, so it succeeds happily
-# while `dsh web` dies with
-#     plugin(s) failed to load: @deepseek-ai/dsh-sandbox-local;
-#     could not be resolved
-# — which is exactly how a half-installed profile once reached a deployment and
-# turned into a restart loop. This boots the real server once, from a COPY so the
-# baked profile stays pristine (a live boot writes sessions/, .runtime/ and
-# .credentials.yaml).
+# Prove the image can boot a profile AT ALL, from an EMPTY home, which is exactly
+# what the container does on a first start. `--dump-config` cannot prove this: it
+# composes the config tree without ever importing the plugin modules, so it
+# succeeds on a tree that cannot load — that gap is how a broken deployment got
+# as far as a restart loop.
 #
-# `timeout` exiting 124 means the server was still up when the clock ran out: that
-# is the success signal. Any other exit code means it crashed on the way up, and
-# the first lines of its log are printed to say why.
+# `timeout` exiting 124 means the server was still up when the clock ran out:
+# that is the success signal. Any other exit code means it crashed on the way up,
+# and its first log lines are printed to say why.
 RUN set -eux; \
-    if [ -d /opt/dsh-profile/profiles/node_modules ]; then \
-      DSH_NPM_BIN="$(cat /tmp/dsh-npm-bin.path)"; \
-      cp -a /opt/dsh-profile /tmp/dsh-boot-check; \
-      status=0; \
-      timeout 60 env DSH_HOME=/tmp/dsh-boot-check DSH_TRUSTED_HOSTS=localhost \
-        node "${DSH_NPM_BIN}" web --no-open > /tmp/dsh-boot.log 2>&1 || status=$?; \
-      sed -n '1,40p' /tmp/dsh-boot.log; \
-      if grep -q 'plugin tree failed to load' /tmp/dsh-boot.log; then \
-        echo 'the pre-installed profile is BROKEN: the plugin tree does not load'; \
-        exit 1; \
-      fi; \
-      if [ "$status" != "124" ]; then \
-        echo "the GUI exited on its own with status ${status} instead of staying up (124 = timed out while running, the success case)"; \
-        exit 1; \
-      fi; \
-      echo 'the GUI booted from the pre-installed profile and stayed up for 60s'; \
-      rm -rf /tmp/dsh-boot-check /tmp/dsh-boot.log; \
-    else \
-      echo 'no pre-installed profile: skipping the boot smoke test'; \
-    fi
+    DSH_NPM_BIN="$(cat /tmp/dsh-npm-bin.path)"; \
+    mkdir -p /tmp/dsh-boot-check; \
+    status=0; \
+    timeout 60 env DSH_HOME=/tmp/dsh-boot-check DSH_TRUSTED_HOSTS=localhost \
+      node "${DSH_NPM_BIN}" web --no-open > /tmp/dsh-boot.log 2>&1 || status=$?; \
+    sed -n '1,40p' /tmp/dsh-boot.log; \
+    if grep -q 'plugin tree failed to load' /tmp/dsh-boot.log; then \
+      echo 'the plugin tree does not load: this image cannot boot a profile'; \
+      exit 1; \
+    fi; \
+    if [ "$status" != "124" ]; then \
+      echo "the GUI exited on its own with status ${status} instead of staying up (124 = timed out while running, the success case)"; \
+      exit 1; \
+    fi; \
+    echo 'the GUI booted from an empty home and stayed up for 60s'; \
+    echo "projected profile packages: $(ls /tmp/dsh-boot-check/profiles/node_modules/@deepseek-ai | wc -l)"; \
+    rm -rf /tmp/dsh-boot-check /tmp/dsh-boot.log
 
 # ── unprivileged identity ───────────────────────────────────────────────────
 # A fresh named volume inherits this owner. compose.yaml overrides the runtime
