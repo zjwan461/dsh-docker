@@ -356,33 +356,41 @@ RUN set -eux; \
 RUN set -eux; \
     DSH_PKG_DIR="$(dirname "$(dirname "$(cat /tmp/dsh-npm-bin.path)")")"; \
     TREE="${DSH_PKG_DIR}/node_modules/@deepseek-ai"; \
+    GLOBAL="$(npm root -g)/@deepseek-ai"; \
+    resolve_pkg() { \
+      if [ -d "${TREE}/$1" ]; then printf '%s' "${TREE}/$1"; \
+      elif [ -d "${GLOBAL}/$1" ]; then printf '%s' "${GLOBAL}/$1"; \
+      fi; \
+    }; \
     echo "--- npm $(npm --version) from $(command -v npm), npm root -g: $(npm root -g) ---"; \
-    echo "--- plugin packages under ${TREE}: $(ls "$TREE" 2>/dev/null | wc -l) ---"; \
+    echo "--- plugin packages: $(ls "$TREE" 2>/dev/null | wc -l) beside the CLI, $(ls "$GLOBAL" 2>/dev/null | wc -l) at the global root ---"; \
     missing=""; \
     for p in dsh-base dsh-web-app dsh-sandbox-local dsh-bash-sandbox dsh-fs-sandbox node-addon-system; do \
-      [ -d "${TREE}/${p}" ] || missing="${missing} ${p}"; \
+      if [ -z "$(resolve_pkg "$p")" ]; then missing="${missing} ${p}"; fi; \
     done; \
     if [ -n "${missing}" ]; then \
       echo "ERROR: the global install is missing:${missing}"; \
       ls -la "$TREE" 2>/dev/null | head -40 || true; \
+      ls -la "$GLOBAL" 2>/dev/null | head -40 || true; \
       exit 1; \
     fi; \
-    echo "--- sandbox / addon packages present ---"; \
-    ls "$TREE" | grep -iE 'sandbox|addon' || true; \
     mismatched=""; \
-    echo "--- versions (every one of these must equal DSH_VERSION=${DSH_VERSION}) ---"; \
+    echo "--- resolved versions (every one must equal DSH_VERSION=${DSH_VERSION}) ---"; \
     for p in dsh-base dsh-web-app dsh-sandbox-local dsh-bash-sandbox dsh-fs-sandbox dsh-pwsh-sandbox dsh-sandbox-policy; do \
-      v="$(node -p "require('${TREE}/${p}/package.json').version" 2>/dev/null || echo '?')"; \
+      d="$(resolve_pkg "$p")"; \
+      v="missing"; \
+      if [ -n "$d" ]; then v="$(node -p "require('${d}/package.json').version" 2>/dev/null || echo '?')"; fi; \
       echo "  ${p} ${v}"; \
-      [ "${v}" = "${DSH_VERSION}" ] || mismatched="${mismatched} ${p}@${v}"; \
+      if [ "${v}" != "${DSH_VERSION}" ]; then mismatched="${mismatched} ${p}@${v}"; fi; \
     done; \
     if [ -n "${mismatched}" ]; then \
-      echo "ERROR: these packages floated away from DSH_VERSION=${DSH_VERSION}:${mismatched}"; \
+      echo "ERROR: these packages are not at DSH_VERSION=${DSH_VERSION}:${mismatched}"; \
       echo 'Prerelease ranges resolve to the NEWEST prerelease, so the CLI and its'; \
-      echo 'bundles can disagree with each other. Pin them all explicitly.'; \
+      echo 'bundles can disagree with each other. DSH_VERSION must be the newest'; \
+      echo 'release of its line, and everything that pattern needs is pinned above.'; \
       exit 1; \
     fi; \
-    echo 'the global install carries the bundles the web profile needs, all at one version'
+    echo 'every package the web profile needs is installed, all at one version'
 
 # ── deployment patch: settings UI on a remote origin ────────────────────────
 # dsh decides where the settings document lives in the BROWSER:
