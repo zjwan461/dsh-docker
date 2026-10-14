@@ -91,9 +91,19 @@ for (let i = 0; i < argv.length; i += 1) {
   }
 }
 if (roots.length === 0) {
+  // The npm CLI's own dependency tree, derived from the path the build recorded.
+  // In a global install this is where the client packages actually live — nested
+  // beside the CLI — and it is root-owned: only the image build, running as root,
+  // can write there. A container running as the unprivileged DSH_UID can only read
+  // it, so a runtime patch attempt can only ever fail with EACCES.
+  try {
+    const bin = readFileSync(process.env.DSH_NPM_BIN_DISCOVERY_FILE ?? '/tmp/dsh-npm-bin.path', 'utf8').trim();
+    if (bin !== '') roots.push(join(dirname(dirname(bin)), 'node_modules'));
+  } catch { /* no record: fall through to the generic roots */ }
   const home = process.env.DSH_HOME;
   if (home) {
-    // Where the web profile's plugins actually land.
+    // Where the web profile projects its plugins — symlinks into the tree above,
+    // so patching the installation copy is what the browser ends up loading.
     roots.push(join(home, 'profiles', 'node_modules'), join(home, 'profiles'));
   }
   roots.push('/usr/local/lib/node_modules', '/usr/lib/node_modules');

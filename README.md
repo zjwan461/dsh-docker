@@ -50,7 +50,7 @@ Caddy 已经同时承担了**域名虚拟主机、TLS 终结、反向代理**三
 | `.env.example` | 所有可调项 |
 | `verify.sh` | 在**物理机**上逐层验证 GUI 链路（DNS→TLS→Caddy→信任围栏→token→cookie→/api→WebSocket），失败项直接给出排查命令 |
 | `data/dsh/settings.yaml` | 服务端配置（提供方/端点/模型），mock 值可直接用。位于 `./data/dsh` 目录挂载内（容器路径 `/data/dsh/settings.yaml`）：**宿主编辑会热重载，Models 页保存也会落到这个文件** |
-| `patch-client-settings.mjs` | 给浏览器 bundle 打补丁，让域名访问时设置页也能读写宿主文档（见「设置页为什么现在能用」）。**由 entrypoint 在 profile 投影完成之后应用**——客户端插件包属于 profile，构建期还不存在。幂等，每次启动重放 |
+| `patch-client-settings.mjs` | 给浏览器 bundle 打补丁，让域名访问时设置页也能读写宿主文档（见「设置页为什么现在能用」）。**构建期以 root 应用**——它改的文件在 root 所有的 npm 全局安装树里，而 profile 的 `node_modules` 只是指向那棵树的符号链接，运行时 uid 无论怎么写都只能 EACCES。entrypoint 每次启动用 `--check` 复核 |
 | `workspaces/` | 工作区 bind mount 源目录 |
 | `skills/` | 内置（bundled）技能目录；构建时 COPY 到镜像 `/opt/dsh-skills`。**目前故意为空**，机制已就绪 |
 | `LICENSE` | Apache License 2.0 全文（与官方文本逐字节一致） |
@@ -288,7 +288,7 @@ isLoopback: transport?.ownsHost === true || pageLocation === void 0
 
 ### 本镜像怎么处理的
 
-`patch-client-settings.mjs` 把上面那条定义改成 `true`，**在容器启动、profile 组合完成之后**应用。三条理由：
+`patch-client-settings.mjs` 把上面那条定义改成 `true`，**在构建期以 root 应用**。三条理由：
 
 - **不需要编译源码。** 浏览器拿到的不是预构建产物：`dsh-client-modules` 是从磁盘读每个插件的 `lib/client.js`，再以 `plugins/<id>/client.js` 提供。改这个文件就是改浏览器实际执行的东西——不用编译 monorepo、不用 fork、不用每次发版 rebase。
 - **只改定义那一处，两处门禁同时生效。** 这是刻意的：`-general` 那处的周边代码在 `0.1.5-rc.1 → 0.2.0-rc.2` 之间**已经变过**（`ctx.settingsScope.describe()` → `ctx.configForms.describe()`），而定义那一行**逐字未变**。
@@ -296,7 +296,9 @@ isLoopback: transport?.ownsHost === true || pageLocation === void 0
 
 补丁失败**只告警、不致命**：没有它整个 GUI 照常工作，只有 Models / General 设置页退化成 `settings are available in this browser`。
 
-> **为什么不在构建期做**（踩过的坑，值得记下）：最初的设计就是在 Dockerfile 里 `RUN` 这个脚本，并且**锚点不匹配就让构建失败**。结果构建直接报 `no client bundle found`——因为**客户端插件包不属于 npm CLI，而属于 profile**：`npm i -g @deepseek-ai/dsh` 装出来的树里没有它们，它们在**启动时**才被 dsh 投影到 `$DSH_HOME/profiles/node_modules`（见「profile 的插件树」）。构建期没有文件可打，只能在启动、投影完成之后打。
+> **为什么补丁必须在构建期打**（踩过的坑）：它改的文件属于 **npm 全局安装树**——`/usr/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-connection/lib/client.js`。那棵树是 **root 所有**，而容器以非特权 `DSH_UID` 运行 ⇒ 运行时写入**必然 EACCES**（实测报错：`cannot stage a file in … (EACCES)`）；而 profile 的 `node_modules` 只是**指向同一棵树的符号链接**，没有可写的副本能替代。
+>
+> 所以补丁在**构建期以 root 应用**（脚本的搜索根由构建期记录的 CLI 路径推导出来，正好落在 `…/dsh/node_modules` 上）。`entrypoint.sh` 每次启动用 `--check` 复核，是为了抓「构建之后插件包被 `dsh plugin` 重装或替换」这种情况——那种情况下修法是重建镜像。
 
 ### 这不是安全回退，但确实放宽了一件事
 
@@ -309,7 +311,7 @@ isLoopback: transport?.ownsHost === true || pageLocation === void 0
 ```bash
 # 启动日志里应出现：
 docker compose logs dsh | grep 'settings-UI patch'
-#   [dsh] settings-UI patch applied: the domain-served GUI edits the host document
+#   [dsh] settings-UI patch present: the domain-served GUI edits the host document
 
 # 手工复核：应打印 `isLoopback: true ...`（路径在 $DSH_HOME/profiles 下，不在 /usr/local/lib/node_modules）
 docker compose exec dsh sh -lc \

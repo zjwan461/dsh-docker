@@ -417,13 +417,22 @@ RUN set -eux; \
 # plugin's lib/client.js from disk as plugins/<id>/client.js, so no monorepo
 # build, no fork and no per-release rebase are needed.
 #
-# It is NOT applied here. The client packages are not dependencies of the npm
-# CLI: they arrive with the `web` PROFILE, which dsh installs with pnpm into
-# $DSH_HOME/profiles/ on first composition. At build time $DSH_HOME is empty (or
-# a throwaway), so there is nothing to patch yet — an earlier revision of this
-# image ran the script here and failed the build with "no client bundle found".
-# entrypoint.sh applies it after it has composed the profile, which is also why
-# the script has to be idempotent and cheap to re-run on every start.
+# It is applied HERE, as root, and nowhere else can work. The file it rewrites
+# belongs to the npm global installation:
+#
+#   /usr/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-connection/lib/client.js
+#
+# That tree is root-owned while the container runs as the unprivileged DSH_UID, so
+# a runtime attempt can only ever end in
+#
+#   cannot stage a file in .../dsh-client-connection/lib (EACCES)
+#
+# and the profile's node_modules is a SYMLINK FARM pointing back into that same
+# tree, so there is no writable copy to patch instead. Patching the installation
+# copy IS patching what the browser loads, because dsh-client-modules serves the
+# file it resolves. entrypoint.sh re-runs this script with --check on every start
+# and only warns, which covers a plugin package reinstalled by `dsh plugin`.
+RUN node /usr/local/bin/dsh-patch-client-settings.mjs
 
 # ── build-time self-check ───────────────────────────────────────────────────
 # The `--dump-config` check is the valuable one: it makes dsh compose the whole

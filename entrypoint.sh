@@ -317,31 +317,27 @@ fi
 
 # ── 3b. deployment patch: settings UI on a remote origin ────────────────────
 #
-# This has to happen AFTER the composition above. The client packages are not
-# dependencies of the npm CLI: they arrive with the `web` profile, which dsh
-# installs with pnpm into $DSH_HOME/profiles/ — so at image build time there is
-# nothing to patch, and at container start the bundles exist only once the
-# profile has been composed. The script is idempotent, so re-running it on every
-# start is both the apply step and the re-apply step after a `dsh plugin`
-# operation replaces the package.
-#
-# A failure here is a warning, never fatal: without the patch the whole GUI still
-# works and only the Models/General settings pages degrade to
-# "settings are available in this browser".
+# The image applies this patch at BUILD time, as root, because the file it
+# rewrites lives in the root-owned npm global installation and the profile's
+# node_modules is a symlink farm pointing back into it — so a runtime attempt can
+# only ever fail with EACCES. This is therefore a verification, not an apply: it
+# catches a plugin package that was reinstalled (e.g. by `dsh plugin`) after the
+# build, and the fix for that is a rebuild.
 PATCH_TOOL=/usr/local/bin/dsh-patch-client-settings.mjs
 if [[ -r "$PATCH_TOOL" ]]; then
-  if patch_out="$(node "$PATCH_TOOL" 2>&1)"; then
-    log "settings-UI patch applied: the domain-served GUI edits the host document"
+  if node "$PATCH_TOOL" --check --quiet; then
+    log "settings-UI patch present: the domain-served GUI edits the host document"
   else
-    warn "the settings-UI patch could NOT be applied. The Models and General"
-    warn "settings pages will report 'settings are available in this browser' when"
-    warn "the GUI is opened through the domain. Details:"
-    while IFS= read -r patch_line; do warn "  ${patch_line}"; done <<<"$patch_out"
-    warn "If the profile was installed by this very start, one restart applies it:"
-    warn "  docker compose restart dsh"
+    warn "the settings-UI patch is NOT present in this image's plugin tree, so the"
+    warn "Models and General settings pages will report 'settings are available in"
+    warn "this browser' when the GUI is opened through the domain."
+    warn "The patch is applied during the image build; seeing this means the plugin"
+    warn "package was reinstalled or replaced afterwards. Rebuild to restore it:"
+    warn "  docker compose build && docker compose up -d"
+    while IFS= read -r patch_line; do warn "  ${patch_line}"; done <<<"$(node "$PATCH_TOOL" --check 2>&1 || true)"
   fi
 else
-  warn "$PATCH_TOOL is missing; the settings-UI patch cannot be applied."
+  warn "$PATCH_TOOL is missing; the settings-UI patch cannot be verified."
 fi
 
 # ── 4. exec ─────────────────────────────────────────────────────────────────
