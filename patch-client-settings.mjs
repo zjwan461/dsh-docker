@@ -65,7 +65,7 @@
 import { readFileSync, writeFileSync, readdirSync, statSync, realpathSync, renameSync, unlinkSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { createRequire } from 'node:module';
-import { spawnSync } from 'node:child_process';
+import { Script } from 'node:vm';
 
 const MARKER = 'PATCHED by dsh-docker';
 const PACKAGE = '@deepseek-ai/dsh-client-connection';
@@ -235,9 +235,12 @@ for (const file of found.values()) {
   // corrupt that shared copy; and /tmp may be unwritable or on another
   // filesystem, which turns a simple replace into an EACCES or EXDEV. Staging in
   // the target's own directory also makes the failure unambiguous — if this
-  // cannot write, the PROFILE DIRECTORY is what the runtime uid lacks permission
+  // cannot write, the PACKAGE directory is what the current uid lacks permission
   // for, and the message says so instead of blaming the patch.
-  const staged = join(dirname(file), `.dsh-client-patch-${process.pid}.tmp`);
+  //
+  // The staged name keeps a .js extension for the sake of tooling that cares; the
+  // syntax gate below no longer depends on it.
+  const staged = join(dirname(file), `.dsh-client-patch-${process.pid}.js`);
   try {
     writeFileSync(staged, next);
   } catch (error) {
@@ -245,7 +248,7 @@ for (const file of found.values()) {
     problems.push(`${file}: cannot stage a file in ${dirname(file)} (${error.code ?? error.message}) — that directory is not writable by uid ${uid}`);
     continue;
   }
-  const parsed = syntaxCheck(staged);
+  const parsed = syntaxCheck(next);
   if (parsed !== true) {
     problems.push(`${file}: the patched bundle does not parse (${parsed}); left untouched`);
     try { unlinkSync(staged); } catch { /* nothing to clean */ }
@@ -263,20 +266,25 @@ for (const file of found.values()) {
 }
 
 /**
- * Parse with this Node, in whichever module system the package declares.
- * Returns true when it parses, otherwise a short reason string.
+ * Parse the patched source the way the BROWSER will, in-process.
+ *
+ * dsh-client-modules loads these bundles as classic scripts, so vm.Script is the
+ * honest parser — and doing it here avoids two traps that `node --check` walks
+ * into: it refuses a file whose extension it does not recognise (an earlier
+ * version staged the file as ".tmp" and this gate then failed on every run), and
+ * it picks its module system from the nearest package.json, which is not what
+ * decides how the browser treats the file.
+ *
+ * Returns true when it parses, otherwise the first line of the parse error.
  */
-function syntaxCheck(file) {
-  let result;
+function syntaxCheck(source) {
   try {
-    result = spawnSync(process.execPath, ['--check', file], { stdio: ['ignore', 'pipe', 'pipe'] });
-  } catch {
-    return true; // a sandbox that forbids spawning must not fail the patch
+    new Script(source, { filename: 'client.js' });
+    return true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return message.split('\n')[0];
   }
-  if (result.error) return true;
-  if (result.status === 0) return true;
-  const stderr = (result.stderr ?? '').toString().trim().split('\n').slice(0, 3).join(' | ');
-  return stderr === '' ? `node --check exited ${result.status}` : stderr;
 }
 
 if (problems.length > 0) {
