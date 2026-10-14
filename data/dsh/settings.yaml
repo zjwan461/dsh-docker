@@ -15,6 +15,7 @@
 #   [ ] 5. 把该端点地址加进 ~/.docker/config.json 的 noProxy
 #          （否则容器里的 HTTP_PROXY 会把它劫持走 → 模型调用失败）
 #   [ ] 6. LITELLM_API_KEY 写进 .env（compose 已把它转成容器环境变量）
+#   [ ] 7. 升级 dsh 到新版本后，核对本文件用到的字段名没变（schema 会演进，而 #          字段名写错是**静默失效**，不报错）： #            docker compose exec dsh sh -lc 'grep -n "input: z.array" "$(find /usr/lib/node_modules -path "*dsh-llm-pi-ai/lib/index.js" | head -1)"' #          期望输出形如：  input: z.array(z.union(MODALITIES)) #          0.1.5-rc.3 实测即此（DEFAULT_INPUT 仍是 ["text"]，所以不写 input 就没有图片能力）。 #          同类需要复核的还有本镜像的客户端补丁锚点，见 README「设置页为什么现在能用」。
 #
 # 生效方式：本文件位于 ./data/dsh，整个目录经 compose 挂到容器 /data/dsh。宿主改这里
 #           = 改容器内那份，【热重载】，下一个请求即生效，不用重启；反过来，网页
