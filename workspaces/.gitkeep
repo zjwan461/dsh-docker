@@ -1,0 +1,7 @@
+# This directory is the bind-mount source for the container's /workspaces.
+
+# It has to exist before `docker compose up`, otherwise Docker creates it as
+# root and the agent (uid 1000 by default) cannot write into it.
+
+# Put the repositories the agent should work on here, or point DSH_WORKSPACES
+# in .env at another host directory.

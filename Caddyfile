@@ -1,0 +1,78 @@
+# Caddyfile — TLS terminator for the containerised DeepSeek Harness Web GUI.
+#
+# Deployment target: https://dsh.example.com
+#
+# The dsh service publishes no port at all; this is the single network entry
+# point. DSH's server carries no TLS of its own and its browser session cookie
+# is deliberately not marked `Secure` (it assumes loopback HTTP), so keep this
+# the ONLY way in and never add a plain-HTTP listener for the same host name:
+# an unencrypted request to the same authority would send that cookie.
+
+{
+	# The example domain is one you cannot obtain a public certificate for, and
+	# a `.local` name (reserved by RFC 6762 for multicast DNS) never can be
+	# either, so ACME is not attempted here at all: the internal issuer
+	# selected below is the only certificate source.
+	#
+	# disable_redirects drops Caddy's :80 HTTP->HTTPS redirect listener. Port 80
+	# is never published, and leaving that listener out removes any chance of a
+	# later port mapping exposing the session cookie over plaintext.
+	auto_https disable_redirects
+}
+
+{$DSH_SITE_ADDRESS} {
+	# `dsh.example.com` is the GUI site — the only site this deployment
+	# serves.
+
+	# ---------------------------------------------------------------------
+	# TLS — use exactly ONE of the two options
+	# ---------------------------------------------------------------------
+
+	# Option A (default, needs no certificate material): Caddy's built-in local
+	# CA. The certificate is issued on the first request; clients show a warning
+	# until they trust that CA. Export it with:
+	#   docker compose exec caddy cat /data/caddy/pki/authorities/local/root.crt > caddy-root.crt
+	# then import caddy-root.crt into the OS / browser trust store.
+	tls internal
+
+	# Option B (no browser warning): a certificate from your own internal CA.
+	# Comment out `tls internal` above, uncomment the line below, and drop the
+	# two files into ./certs (mounted read-only at /certs):
+	# tls /certs/dsh.example.com.crt /certs/dsh.example.com.key
+
+	# ---------------------------------------------------------------------
+	# Headers
+	# ---------------------------------------------------------------------
+	header {
+		# Only meaningful once clients actually trust the certificate (Option A
+		# after the CA import, or Option B). Browsers do NOT record HSTS from a
+		# connection with a certificate error, so the "proceed anyway" click keeps
+		# working with the untrusted internal CA — but once the CA HAS been trusted
+		# and later breaks, HSTS removes that button. See the README troubleshooting
+		# table for the escape hatch.
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+
+	# ---------------------------------------------------------------------
+	# Optional second factor in front of DSH's own launch-token login.
+	# Generate the hash with:
+	#   docker compose exec caddy caddy hash-password --plaintext 'your-password'
+	# ---------------------------------------------------------------------
+	# basic_auth {
+	# 	you $2a$14$REPLACE_WITH_HASH
+	# }
+
+	# ---------------------------------------------------------------------
+	# Upstream
+	# ---------------------------------------------------------------------
+	# The Host header MUST reach DSH unchanged: the /api browser-trust fence
+	# compares it against DSH_TRUSTED_HOSTS, and the session cookie is bound to
+	# the host name plus port. reverse_proxy preserves the incoming Host by
+	# default — do not add a header_up Host override here.
+	reverse_proxy {$DSH_UPSTREAM} {
+		# Stream Server-Sent Events and WebSocket frames without buffering.
+		# Without this the GUI connects but never finishes loading.
+		flush_interval -1
+	}
+}

@@ -1,0 +1,17 @@
+# Secrets and machine-local state. Never commit these.
+.env
+certs/
+caddy-root.crt
+
+# The workspace bind-mount source: keep the directory, ignore its contents.
+workspaces/*
+!workspaces/.gitkeep
+
+# Host-side DSH home, bind-mounted at /data/dsh (see compose.yaml). It holds
+# sessions, the browser-cookie secret and provider credentials, so only the
+# settings seed is tracked. The parent directory must be un-ignored before the
+# file can be: git cannot re-include a file inside an excluded directory.
+data/*
+!data/dsh/
+data/dsh/*
+!data/dsh/settings.yaml

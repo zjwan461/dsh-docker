@@ -1,0 +1,167 @@
+name: dsh
+
+# DeepSeek Harness Web GUI behind one TLS reverse proxy.
+#
+#   browser ──HTTPS──> caddy ──HTTP (compose network)──> dsh:3080
+#
+# The dsh service publishes no port. Caddy is the only network entry point,
+# which is what lets the container bind 0.0.0.0 internally while the host still
+# exposes nothing but the TLS port.
+
+x-dsh-image: &dsh-image
+  build:
+    context: .
+    args:
+      DSH_VERSION: ${DSH_VERSION:-0.1.5-rc.1}
+      DSH_UID: ${DSH_UID:-1000}
+      DSH_GID: ${DSH_GID:-1000}
+  image: dsh:${DSH_VERSION:-0.1.5-rc.1}
+
+services:
+  dsh:
+    <<: *dsh-image
+    restart: unless-stopped
+    # Match this to the owner of DSH_WORKSPACES on the host, otherwise the
+    # agent cannot write into its workspace. On a typical single-user server
+    # the default already matches.
+    user: "${DSH_UID:-1000}:${DSH_GID:-1000}"
+    working_dir: /workspaces
+    # Lets settings.yaml reach a LiteLLM running on the Docker HOST as
+    # http://host.docker.internal:4000/v1 (inside a container, `localhost` is
+    # the container itself). Requires Docker 20.10+.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      # DSH_* names are bootstrap-only: they must arrive as real environment
+      # variables, never through a .env file inside the container.
+      DSH_HOME: /data/dsh
+      DSH_BIND_HOST: "0.0.0.0"
+      DSH_BIND_PORT: ${DSH_BIND_PORT:-3080}
+      # Inherited environment outranks the managed credential file and any
+      # workspace .env, so a cloned repository cannot redirect this key.
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      # Credential for the internal vLLM-behind-LiteLLM route declared in
+      # settings.yaml (llm-pi-ai.providers.vllm-local.apiKeyEnv names it).
+      LITELLM_API_KEY: ${LITELLM_API_KEY:-}
+      # read-only | workspace-write | danger-full-access
+      DSH_PERMISSION_MODE: ${DSH_PERMISSION_MODE:-workspace-write}
+      # Empty value => no --trusted-host flag => browser accesses get 403.
+      DSH_TRUSTED_HOSTS: ${DSH_TRUSTED_HOSTS:-}
+      DSH_TELEMETRY_DISABLED: ${DSH_TELEMETRY_DISABLED:-1}
+      TZ: ${TZ:-UTC}
+    # The settings UI works over the domain because this image ships a deployment
+    # patch (patch-client-settings.mjs) that makes `$host.isLoopback` true in the
+    # browser bundle, so the pages edit the HOST document instead of a session-local
+    # one. If that patch is ever reverted, a loopback origin is the only remaining
+    # route to the settings pages, and this optional binding provides it:
+    #     ssh -L 3080:127.0.0.1:3080 <user>@<server>
+    #     open http://127.0.0.1:3080/?token=<from docker compose logs dsh>
+    # ports:
+    #   - "127.0.0.1:3080:3080"
+    volumes:
+      # $DSH_HOME is a DIRECTORY bind mount, not a named volume, so that the host
+      # and the web UI write the same real file:
+      #
+      #   * the settings provider persists with an atomic write — a temp file plus
+      #     rename() over the target (dsh-config-editor -> writeFileAtomic, under
+      #     withFileLock). A SINGLE-FILE bind mount cannot support that: rename()
+      #     onto a mount point fails with EBUSY, and with `:ro` it fails with
+      #     EROFS. Binding the directory leaves rename() an ordinary in-directory
+      #     operation, so a save from the Models page lands on the host file while
+      #     a host edit is hot-reloaded through the chokidar watcher. Both
+      #     directions work and the two copies cannot diverge.
+      #
+      #   * The host directory must exist before `up` (Docker creates a missing
+      #     bind source as a root-owned directory) and must be writable by
+      #     DSH_UID:DSH_GID. entrypoint.sh checks both and prints the fix.
+      #
+      #   * Hot reload relies on inotify reaching the container. Guaranteed on a
+      #     Linux server host; on Windows/macOS Docker Desktop the mount may not
+      #     propagate file events — fall back to `docker compose restart dsh`.
+      #
+      #   * data/dsh/settings.yaml is both the seed and the file the UI edits. The
+      #     named volume this replaced also held sessions/ and .credentials.yaml,
+      #     so migrate it once — but KEEP the repository's settings.yaml, which is
+      #     the configuration that is live today. A stale copy inside the volume
+      #     (from the era when the file lived there) would otherwise silently
+      #     replace it:
+      #       docker compose down
+      #       docker run --rm -v dsh_dsh-home:/from -v "$PWD/data/dsh":/to alpine \
+      #         sh -c 'cp -a /from/. /to/; [ -f /to/settings.yaml ] && mv /to/settings.yaml /to/settings.yaml.from-volume'
+      #       git checkout -- data/dsh/settings.yaml
+      #       sudo chown -R "$(id -u):$(id -g)" ./data/dsh
+      #     The old volume can then be dropped: docker volume rm dsh_dsh-home
+      - ./data/dsh:/data/dsh
+      - ${DSH_WORKSPACES:-./workspaces}:/workspaces
+    stop_grace_period: 15s
+    # GET / without a valid browser cookie answers 401, which is the healthy
+    # state for a server that has never been logged into.
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$${DSH_BIND_PORT:-3080}/ | grep -qE '^(200|401)$'"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+    networks: [dsh]
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    # `required: false` (Compose v2.20+) decouples this proxy from the backend,
+    # so `up -d caddy` alone is possible and an absent backend simply leaves the
+    # site answering 502 while Caddy still starts.
+    # `condition: service_started` (not service_healthy) is deliberate: waiting
+    # for a healthcheck would delay the proxy by the whole start_period, and a
+    # 502 during the first minute after `up` is expected.
+    depends_on:
+      dsh:
+        condition: service_started
+        required: false
+    environment:
+      DSH_SITE_ADDRESS: ${DSH_SITE_ADDRESS:?set DSH_SITE_ADDRESS in .env, e.g. https://dsh.example.com}
+      DSH_UPSTREAM: dsh:${DSH_BIND_PORT:-3080}
+      # Docker injects HTTP_PROXY/HTTPS_PROXY into containers from the client or
+      # daemon proxy config, and a build can bake them into the image as ENV.
+      # Caddy's reverse_proxy honors those variables, so the upstream request
+      # would be sent to the corporate proxy instead of over the compose
+      # network; the proxy cannot reach `dsh` and answers 504, which Caddy
+      # relays to the browser. That looks exactly like a broken container
+      # network but is not one. Caddy needs no outbound access at all here
+      # (`tls internal` performs no ACME), so clear the variables and bypass any
+      # that survive the injection.
+      # NOTE: if this deployment ever switches to a public domain with ACME,
+      # drop NO_PROXY/no_proxy="*" here — Caddy then needs outbound access to
+      # the CA, and "*" would deny it a route out.
+      HTTP_PROXY: ""
+      HTTPS_PROXY: ""
+      http_proxy: ""
+      https_proxy: ""
+      NO_PROXY: "*"
+      no_proxy: "*"
+    # ONE published port, serving the GUI site. Check before the first `up`:
+    #   sudo ss -ltnp 'sport = :443'
+    # If another web server already owns :443, either front this stack with that
+    # server or move the site to a spare port (see .env.example).
+    ports:
+      - "${DSH_PUBLIC_BIND:-0.0.0.0}:${DSH_PUBLIC_PORT:-443}:${DSH_PUBLIC_PORT:-443}"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Only read when Caddyfile Option B (a certificate from your internal CA)
+      # is enabled; harmless while the directory is empty.
+      - ./certs:/certs:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks: [dsh]
+
+networks:
+  dsh:
+    driver: bridge
+
+volumes:
+  # Caddy's certificates and ACME account. The GUI's own state (profiles/,
+  # sessions/, storages/, .credentials.yaml, settings.yaml) is deliberately NOT a
+  # named volume: it is the ./data/dsh directory bind mount above, so that the
+  # host and the web UI edit the same files and either side can be inspected or
+  # backed up with ordinary file tools.
+  caddy-data:
+  caddy-config:

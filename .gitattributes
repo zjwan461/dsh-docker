@@ -1,0 +1,7 @@
+# Authored on Windows, deployed on Linux: pin LF everywhere.
+#
+# Without this, a fresh clone on a machine whose core.autocrlf=true gets a CRLF
+# working tree. A CRLF shell script then fails inside the container with
+# "bash\r: No such file or directory", and a CRLF Caddyfile/token can behave
+# oddly too. `eol=lf` fixes the working tree as well as the repository blob.
+* text=auto eol=lf

@@ -1,0 +1,19 @@
+# Never send machine-local secrets into a build context.
+.env
+certs/
+
+# The workspace bind-mount source: a local working tree, created at runtime.
+workspaces
+
+# The host-side DSH home, bind-mounted at /data/dsh. It holds sessions and
+# .credentials.yaml, so it must never be sent into a build context.
+data
+
+# Not consumed by the Dockerfile: repo meta and the host-side helpers.
+README.md
+LICENSE
+verify.sh
+.git
+.gitignore
+.gitattributes
+*.log

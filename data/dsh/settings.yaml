@@ -1,0 +1,73 @@
+# DeepSeek Harness user-settings document.
+#
+# This file is the MOCK/default version of the server-side configuration. It is
+# the document the web Models page would have written; editing it is the
+# server-side equivalent. The web Models page can write this same file
+# directly - see README: 设置页为什么现在能用.
+#
+# It holds NO secrets: `apiKeyEnv` names a credential, it does not contain one.
+#
+# ── 放上服务器后按这个清单改 ────────────────────────────────────────────────
+#   [ ] 1. vllm-local.baseURL        → 你的 LiteLLM 地址（含 /v1）
+#   [ ] 2. vllm-local.models[].id    → LiteLLM /v1/models 返回的 id
+#   [ ] 3. models[].contextWindow / maxTokens → vLLM 的真实上限
+#   [ ] 4. 取消注释 agent-default-model，provider/model 与上面一致
+#   [ ] 5. 把该端点地址加进 ~/.docker/config.json 的 noProxy
+#          （否则容器里的 HTTP_PROXY 会把它劫持走 → 模型调用失败）
+#   [ ] 6. LITELLM_API_KEY 写进 .env（compose 已把它转成容器环境变量）
+#
+# 生效方式：本文件位于 ./data/dsh，整个目录经 compose 挂到容器 /data/dsh。宿主改这里
+#           = 改容器内那份，【热重载】，下一个请求即生效，不用重启；反过来，网页
+#           Models 页保存也写回同一个文件（所以必须是目录挂载，不能是只读单文件挂载）。
+#           （Windows/macOS 的 Docker Desktop 可能不传播文件事件，热重载失效时
+#            用 `docker compose restart dsh` 兜底；Linux 服务器上无此问题。）
+# 改完一定查一次日志——段落无效是静默回退，不会报错：
+#   docker compose logs dsh | grep 'keeping the last good'
+
+# ── 官方 DeepSeek 适配器（命名空间 llm-deepseek）────────────────────────────
+# 走内部模型时这一节可以整段删掉；但注意 web_search 用的是同一个
+# DEEPSEEK_API_KEY，想保留联网搜索就别删 compose 里的环境变量。
+llm-deepseek:
+  apiKeyEnv: DEEPSEEK_API_KEY
+  # baseURL: https://your-gateway.example/v1    # 适配器会拼 /chat/completions
+
+# ── vLLM via LiteLLM（命名空间 llm-pi-ai）──────────────────────────────────
+llm-pi-ai:
+  providers:
+    vllm-local:
+      displayName: Internal gateway
+      api: openai-completions
+      # [1] MOCK 值：host.docker.internal 指向 Docker 宿主机（compose 里已加
+      #     extra_hosts: host-gateway）。三种常见形态：
+      #       宿主机上的 LiteLLM  → http://host.docker.internal:4000/v1
+      #       另一台机器          → http://10.x.x.x:4000/v1
+      #       同 compose 网络的容器 → http://litellm:4000/v1
+      baseURL: http://put-your-api-endpoint-here/v1
+      # 凭据名，不是密钥本身；compose 里 LITELLM_API_KEY 已映射进容器环境。
+      # LiteLLM 一般即使本地模型也要 key；若确实无需认证，删掉这一行。
+      apiKeyEnv: LITELLM_API_KEY
+      models:
+        # [2][3] MOCK 值：换成 `curl $baseURL/models -H "Authorization: Bearer $KEY"` 里的 id
+        - id: example-model
+          name: example-model
+          contextWindow: 1010000
+          maxTokens: 131072
+          # 输入模态：text | image。**不写就只有 text**（schema 默认 DEFAULT_INPUT=["text"]）——
+          # 此时该模型被判定为不支持图片输入：附件里的图片会被降级处理 / 拒绝，
+          # 而不是真的发给模型。模型本身是视觉模型（VL / vision）时才加 image。
+          input: [text, image]
+
+      # vLLM 上跑推理模型（R1/QwQ 之类）且 pi-ai 认不出你的 URL 时才需要：
+      # compat:
+      #   thinkingFormat: deepseek
+      # 另有两个 vLLM 专用兼容项 compat.vllmPriority / compat.chatTemplateKwargs，
+      # 先别动，等出现具体症状再查。
+
+# ── 新会话默认用哪个模型（命名空间 agent-default-model）─────────────────────
+# [4] 修好上面之后再取消注释。保持注释状态时，默认仍是合成值
+#     deepseek-official / deepseek-flash，聊天照常可用——这样这份 mock 文件
+#     拷进去不会把现有的对话能力弄坏。
+# agent-default-model:
+#   provider: vllm-local
+#   model: qwen2.5-32b-instruct
+#   # reasoningEffort: high
