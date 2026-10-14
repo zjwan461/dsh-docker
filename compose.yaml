@@ -56,6 +56,7 @@ services:
       # copied there at build time) and are enabled at container start. Point this at
       # a mounted host directory to add plugins without rebuilding the image.
       DSH_PLUGIN_ROOT: ${DSH_PLUGIN_ROOT:-/opt/dsh-plugins}
+
       TZ: ${TZ:-UTC}
     # The settings UI works over the domain because this image ships a deployment
     # patch (patch-client-settings.mjs) that makes `$host.isLoopback` true in the
@@ -208,6 +209,9 @@ services:
       - "${DSH_PUBLIC_BIND:-0.0.0.0}:${DSH_PUBLIC_PORT:-443}:${DSH_PUBLIC_PORT:-443}"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # The page Caddy serves for an unauthenticated first visit (Caddyfile's
+      # @firstVisit route). A static file, so dsh and its plugins stay untouched.
+      - ./unauth:/srv/unauth:ro
       # Only read when Caddyfile Option B (a certificate from your internal CA)
       # is enabled; harmless while the directory is empty.
       - ./certs:/certs:ro

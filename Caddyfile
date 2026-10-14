@@ -76,16 +76,42 @@ https://{$DSH_SITE_ADDRESS} {
 	# }
 
 	# ---------------------------------------------------------------------
-	# Upstream
+	# Unauthenticated first visit: our page, not dsh's one-liner
 	# ---------------------------------------------------------------------
-	# The Host header MUST reach DSH unchanged: the /api browser-trust fence
-	# compares it against DSH_TRUSTED_HOSTS, and the session cookie is bound to
-	# the host name plus port. reverse_proxy preserves the incoming Host by
-	# default — do not add a header_up Host override here.
-	reverse_proxy {$DSH_UPSTREAM} {
-		# Stream Server-Sent Events and WebSocket frames without buffering.
-		# Without this the GUI connects but never finishes loading.
-		flush_interval -1
+	# A browser arriving with NEITHER a session cookie NOR a token is exactly the
+	# bootstrap case, and dsh answers it with one line of plain text. Give it the
+	# page that says where the token is. Nothing else moves: a token URL, an
+	# existing session, assets and the API all go straight to dsh, and dsh stays
+	# the only thing that decides who is authenticated — this route recognises the
+	# ABSENCE of a credential and never grants one.
+	#
+	# The page is a static file served by Caddy, so no dsh plugin and no file in
+	# the install tree is involved, and a dsh upgrade cannot break it.
+	@firstVisit {
+		method GET
+		path /
+		not header Cookie *dsh-auth-*
+		not query token=*
+	}
+	handle @firstVisit {
+		root * /srv/unauth
+		rewrite * /index.html
+		file_server
+	}
+
+	handle {
+		# ---------------------------------------------------------------------
+		# Upstream
+		# ---------------------------------------------------------------------
+		# The Host header MUST reach DSH unchanged: the /api browser-trust fence
+		# compares it against DSH_TRUSTED_HOSTS, and the session cookie is bound to
+		# the host name plus port. reverse_proxy preserves the incoming Host by
+		# default — do not add a header_up Host override here.
+		reverse_proxy {$DSH_UPSTREAM} {
+			# Stream Server-Sent Events and WebSocket frames without buffering.
+			# Without this the GUI connects but never finishes loading.
+			flush_interval -1
+		}
 	}
 }
 # ---------------------------------------------------------------------------

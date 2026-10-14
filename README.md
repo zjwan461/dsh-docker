@@ -588,6 +588,30 @@ docker compose exec dsh dsh plugin --profile web remove <package>
 1. **它不是认证**。校验在浏览器里做，账号与密码随页面一起下发 ⇒ 它挡的是「随手打开的 Harness 窗口」，**不保护** Harness 的 HTTP API、CLI 或磁盘上的 profile：绕过页面直接请求 API 依然可达。
 2. **默认凭据是公开的**（`admin` / `dsh-admin`）⇒ 启动脚本会在日志里告警提醒你改。尤其注意**明文 :80 那条路**：页面下发的内容与会话 cookie 都能被链路上的观察者读到 ⇒ 这门禁在明文通道上**不提供任何保护**。
 
+## 首次登录：token 与「多久要再登一次」
+
+`dsh web` 启动时会把一条带 `?token=…` 的地址打进容器日志；浏览器拿它换一个**签名的会话 cookie**，之后直接访问即可。两点必须知道：
+
+- token **每次重启重新生成、不落盘** ⇒ 新设备/新浏览器第一次需要它（重启后旧 token 立即失效）
+- cookie 是**持久**的（签名密钥在 `data/dsh/.credentials.yaml`，随宿主目录走）⇒ 只要 cookie 没过期，重启容器甚至重建镜像都不用再输 token
+
+所以真正决定「多久要再登一次」的是 **cookie 有效期**，上游默认 **30 天**。要改长，只需在 **`data/dsh/cordis.patch.yml`**（= `$DSH_HOME/cordis.patch.yml`，启动时读入；登录门禁的选项也在同一个文件里）追加：
+
+```yaml
+- id: connection
+  config:
+    # 必须一并重复声明：补丁层可能是「替换」而非「合并」语义，
+    # 丢掉这个表达式会让浏览器信任围栏失效，所有访问变成 403。
+    trustedHosts: !!js ctx.webRuntime.trustedHosts
+    cookieMaxAgeDays: 365
+```
+
+改完 `docker compose restart dsh` 即可，**不需要重建镜像**。
+
+⚠️ 只在 **TLS** 这条路上加长：会话 cookie **不带 `Secure`**，明文监听上它能被链路上的观察者嗅探。
+
+拿不到 token 时，HTTPS 站点会给你一个**提示页**（`unauth/index.html`），上面就是到服务器取链接的命令。明文监听那一侧**没有**接这个页面，原因写在 Caddyfile 里那段注释中：白名单外的人不该知道该监听器存在。
+
 ## 内置技能（机制已就绪，暂不带技能）
 
 镜像里**已经装好了「内置技能」的机制**，但**故意一个技能都不带**。想加的时候，把技能放进仓库的 `skills/`，重新构建即可。
