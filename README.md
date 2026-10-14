@@ -657,4 +657,3 @@ docker compose logs dsh | grep 'built-in skills'
 
 本项目采用 **Apache License 2.0**，全文见 [`LICENSE`](LICENSE)。该文件与官方文本 <https://www.apache.org/licenses/LICENSE-2.0.txt> **逐字节一致**（SHA256 `cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30`）。
 
-`LICENSE` 末段附录里的 `[yyyy] [name of copyright owner]` 仍是官方占位符：要署名就替换成实际值，或另加一个 `NOTICE` 文件（Apache 2.0 第 4(d) 条要求随分发传递 NOTICE 的内容）。
