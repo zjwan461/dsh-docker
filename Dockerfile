@@ -310,6 +310,38 @@ RUN set -eux; \
     printf '%s' "${found}" > /tmp/dsh-npm-bin.path; \
     node "${found}" --version
 
+# ── verify the global install actually carries the plugin tree ──────────────
+# The web profile resolves its plugins from THIS tree: dsh projects the
+# installation into $DSH_HOME/profiles/node_modules as symlinks, and the profile
+# itself declares no dependencies, so a package missing here cannot be recovered
+# from anywhere.
+#
+# `@deepseek-ai/dsh-sandbox-local` is a regular dependency of
+# `@deepseek-ai/dsh-base`, and it imports
+# `@deepseek-ai/node-addon-system/landlock-run` at module scope. That subpath is
+# supplied by the platform package `node-addon-system-linux-x64`, which arrives
+# as an OPTIONAL dependency — so an npm that skips optional deps (or a different
+# npm prefix than the one the CLI was installed with) takes the whole plugin tree
+# down, with the symptom pointing at the import site rather than the cause:
+#   plugin(s) failed to load: @deepseek-ai/dsh-sandbox-local; could not be resolved
+RUN set -eux; \
+    DSH_PKG_DIR="$(dirname "$(dirname "$(cat /tmp/dsh-npm-bin.path)")")"; \
+    TREE="${DSH_PKG_DIR}/node_modules/@deepseek-ai"; \
+    echo "--- npm $(npm --version) from $(command -v npm), npm root -g: $(npm root -g) ---"; \
+    echo "--- plugin packages under ${TREE}: $(ls "$TREE" 2>/dev/null | wc -l) ---"; \
+    missing=""; \
+    for p in dsh-base dsh-web-app dsh-sandbox-local node-addon-system; do \
+      [ -d "${TREE}/${p}" ] || missing="${missing} ${p}"; \
+    done; \
+    if [ -n "${missing}" ]; then \
+      echo "ERROR: the global install is missing:${missing}"; \
+      ls -la "$TREE" 2>/dev/null | head -40 || true; \
+      exit 1; \
+    fi; \
+    echo "--- sandbox / addon packages present ---"; \
+    ls "$TREE" | grep -iE 'sandbox|addon' || true; \
+    echo 'the global install carries the bundles the web profile needs'
+
 # ── deployment patch: settings UI on a remote origin ────────────────────────
 # dsh decides where the settings document lives in the BROWSER:
 #
@@ -398,6 +430,14 @@ RUN set -eux; \
     timeout 60 env DSH_HOME=/tmp/dsh-boot-check DSH_TRUSTED_HOSTS=localhost \
       node "${DSH_NPM_BIN}" web --no-open > /tmp/dsh-boot.log 2>&1 || status=$?; \
     sed -n '1,40p' /tmp/dsh-boot.log; \
+    echo "--- the profile projected $(ls /tmp/dsh-boot-check/profiles/node_modules/@deepseek-ai 2>/dev/null | wc -l) packages ---"; \
+    ls /tmp/dsh-boot-check/profiles/node_modules/@deepseek-ai 2>/dev/null | grep -iE 'sandbox|addon' || echo '(no sandbox/addon packages projected)'; \
+    echo '--- can Node resolve these from the profile directory? ---'; \
+    mkdir -p /tmp/dsh-boot-check/profiles/web; \
+    for m in @deepseek-ai/dsh-base @deepseek-ai/dsh-sandbox-local @deepseek-ai/node-addon-system/landlock-run; do \
+      printf 'resolve %s -> ' "$m"; \
+      (cd /tmp/dsh-boot-check/profiles/web && node -p "require.resolve('$m')" 2>&1 | head -n 1) || true; \
+    done; \
     if grep -q 'plugin tree failed to load' /tmp/dsh-boot.log; then \
       echo 'the plugin tree does not load: this image cannot boot a profile'; \
       exit 1; \
