@@ -353,6 +353,15 @@ RUN set -eux; \
 # npm prefix than the one the CLI was installed with) takes the whole plugin tree
 # down, with the symptom pointing at the import site rather than the cause:
 #   plugin(s) failed to load: @deepseek-ai/dsh-sandbox-local; could not be resolved
+#
+# RESOLVED, and verified by a real build: with DSH_VERSION at the newest release
+# of its line and the four packages above pinned explicitly, the install is
+# consistent. npm then places the pinned four at the npm global ROOT and nests
+# the rest beside the CLI — two locations, both of which Node resolves (the
+# global root is itself an ancestor node_modules directory), which is why the
+# check below looks in both. The boot smoke test that follows is what actually
+# proves the profile projection resolves the sandbox plugins from wherever they
+# landed; that test is the reason this image is known to boot.
 RUN set -eux; \
     DSH_PKG_DIR="$(dirname "$(dirname "$(cat /tmp/dsh-npm-bin.path)")")"; \
     TREE="${DSH_PKG_DIR}/node_modules/@deepseek-ai"; \

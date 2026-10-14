@@ -504,7 +504,7 @@ docker compose exec dsh dsh plugin --profile web remove <package>
 
 | `plugin(s) failed to load: @deepseek-ai/dsh-sandbox-local; could not be resolved`（并伴随重启循环）| **profile 的投影过期/残缺**。`$DSH_HOME/profiles` 是 dsh 启动时用 pnpm 装的，装一半就会这样。先看宿主侧（A2 之后状态就在眼前）：`ls data/dsh/profiles/node_modules/@deepseek-ai \| wc -l`（完整约 250）。`$DSH_HOME/profiles/node_modules` 是 dsh 启动时从**安装树**投影出来的，profile 自身没有依赖，所以**没有任何东西会重建它**。对照包数：`ls data/dsh/profiles/node_modules/@deepseek-ai | wc -l`（完整应与安装树同量级，约 250）。修法：`rm -rf data/dsh/profiles/node_modules && docker compose restart dsh`。**chown 不管用**（坏的是内容）。若**全新 home 首启**就失败，则是镜像本身有问题——看构建期冒烟测试的输出。 |
 
-| 构建期 `ERESOLVE could not resolve`，或启动报 `plugin(s) failed to load: … could not be resolved` | **预发布版本漂移**。dsh 各包之间用 `^0.1.5-rc.1` 这类范围互相依赖，而 npm 会解析到**该范围里最新的预发布版**：CLI 停在 rc.1，`dsh-base` 却浮到 rc.3，树变成 rc.1/rc.3 混装 ⇒ 部分插件包不在安装树**顶层** ⇒ dsh 的 profile 投影看不到它 ⇒ 启动必失败（而 `--dump-config` 只组合配置、不 import 模块，所以自检照样通过）。**规则：`DSH_VERSION` 用该系列里最新的那个**——范围没有更新的可浮，自然就稳定（semver 还会把 `^0.1.5-rc.3` 限制在 0.1.5 tuple 内，`0.1.6-alpha.x` 进不来）。构建期的版本断言会点名漂移的包。 |
+| 构建期 `ERESOLVE could not resolve`，或启动报 `plugin(s) failed to load: … could not be resolved` | **预发布版本漂移**。dsh 各包之间用 `^0.1.5-rc.1` 这类范围互相依赖，而 npm 会解析到**该范围里最新的预发布版**：CLI 停在 rc.1，`dsh-base` 却浮到 rc.3，树变成 rc.1/rc.3 混装 ⇒ 部分插件包不在安装树**顶层** ⇒ dsh 的 profile 投影看不到它 ⇒ 启动必失败（而 `--dump-config` 只组合配置、不 import 模块，所以自检照样通过）。**规则：`DSH_VERSION` 用该系列里最新的那个**——范围没有更新的可浮，自然就稳定（semver 还会把 `^0.1.5-rc.3` 限制在 0.1.5 tuple 内，`0.1.6-alpha.x` 进不来）。构建期的版本断言会点名漂移的包。<br>另外两点实测事实：**显式 pin 的包落在 npm 全局根**（`/usr/lib/node_modules/@deepseek-ai/`），而 **CLI 的依赖嵌套在它旁边**（`.../dsh/node_modules/@deepseek-ai/`）——Node 两处都能解析（全局根本身就是祖先 `node_modules` 目录），所以构建期断言**两处都查**（这一点曾被断言误报为 missing，构建日志里那 209 个包就是嵌套树）。 |
 
 ## 安全边界（务必知悉）
 
