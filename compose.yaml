@@ -158,6 +158,7 @@ services:
     #   sudo ss -ltnp 'sport = :443'
     # If another web server already owns :443, either front this stack with that
     # server or move the site to a spare port (see .env.example).
+    #     # OPTIONAL, and dangerous: publishing :80 would serve the GUI over plaintext     # HTTP. DSH's session cookie is not marked Secure, and that cookie is the only     # authentication in front of an agent that can run commands in this container,     # so plaintext over a shared network is equivalent to handing out remote code     # execution. See the matching warning in the Caddyfile before enabling it.     # ports:     #   - "${DSH_PUBLIC_BIND:-0.0.0.0}:80:80"
     ports:
       - "${DSH_PUBLIC_BIND:-0.0.0.0}:${DSH_PUBLIC_PORT:-443}:${DSH_PUBLIC_PORT:-443}"
     volumes:

@@ -76,3 +76,28 @@
 		flush_interval -1
 	}
 }
+# ---------------------------------------------------------------------------
+# OPTIONAL, and dangerous: a plaintext HTTP site, for when TLS cannot be made to
+# work. It is commented out on purpose — read the warning before uncommenting.
+#
+# DSH's browser session cookie is deliberately NOT marked `Secure` (the project
+# assumes a loopback origin), so over plaintext HTTP that cookie travels in the
+# clear on every request. It is the ONLY authentication in front of an agent that
+# can run commands inside this container, so on a shared network this is
+# equivalent to handing out remote code execution. Never expose it to the
+# internet, and prefer the certificate-free option that does NOT leak the cookie:
+# publish dsh on host loopback only and browse http://127.0.0.1:3080 through an
+# SSH tunnel (README 「出路 B」) — the cookie then never leaves the client machine.
+#
+# If you accept the risk: uncomment the site, publish :80 in compose.yaml, and
+# keep the allowlist. Replace the ranges with the addresses that may use it.
+#
+# 	http://223.254.129.15 {
+# 		@allowed remote_ip 192.168.0.0/16 10.0.0.0/8
+# 		handle @allowed {
+# 			reverse_proxy {$DSH_UPSTREAM} {
+# 				flush_interval -1
+# 			}
+# 		}
+# 		respond 403
+# 	}
