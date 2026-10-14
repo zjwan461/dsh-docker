@@ -445,6 +445,30 @@ docker compose logs caddy | grep -i -E 'certificate|obtain|error'
 
 `verify.sh` 会逐层打印 PASS/FAIL，退出码非 0 表示有断言失败；失败项旁边会直接给出对应的排查命令。
 
+
+### 部署完成后的验收清单（本镜像新增的那些能力）
+
+按顺序过一遍。每条都给出期望值，以及不符合时先看哪里。
+
+| # | 检查 | 期望 | 不符合时 |
+|---|---|---|---|
+| 1 | `docker compose logs dsh \| grep 'settings-UI patch'` | `settings-UI patch present` | 插件包在构建后被重装/替换过 ⇒ `docker compose build && docker compose up -d` |
+| 2 | 浏览器打开 GUI → 设置 → 模型 | 列出 provider（DeepSeek 与你的自定义 provider），可编辑并保存 | 页面提示 `settings are available in this browser` ⇒ 补丁没生效，回到第 1 条 |
+| 3 | 在模型页改一项并保存，宿主上 `git diff data/dsh/settings.yaml` | 看到 UI 的写入落到宿主文件 | `data/dsh` 不是目录挂载，或属主与 `DSH_UID` 不一致（见排障表） |
+| 4 | 让 agent 执行 `touch /etc/probe` | `[sandbox: file access denied under workspace-write mode]` | 出现 `SANDBOX_UNAVAILABLE` ⇒ 该内核没有 Landlock（启动日志里有 doctor 结论） |
+| 5 | `docker compose logs dsh \| grep 'landlock launcher'` | `full (/usr/.../landlock-run)` | `partial` = 内核 Landlock ABI 偏旧（文件效果仍受限，fail-closed）；`cannot locate` = `DSH_GLOBAL_ROOT` 指错目录 |
+| 6 | `docker compose exec dsh soffice --headless --version`；同理试 `ffmpeg -version`、`pdftotext -v`、`python3 -c "import pptx"`、`fc-list \| grep -ci CJK` | 各自输出版本；CJK 字体数为正 | 检查 `.env` 的 `INSTALL_OFFICE` / `INSTALL_PYTHON_DOCS` 是否为 1，然后重建镜像 |
+| 7 | `docker compose logs dsh \| grep 'built-in skills'` | `none in /opt/dsh-skills (mechanism ready; …)`；放了技能后变成计数 | 打出「机制就绪」即算通过：本镜像不带技能 |
+| 8 | 同时开 443 与明文端口时：`curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:<宿主端口>/` | `401` | `403` = `DSH_HTTP_ALLOWED_RANGES` 挡住了（**从服务器自己发起会被挡，属正常**，见下）；`000`/拒绝连接 = Caddyfile 里那个明文站点还没解开或 caddy 没重建 |
+| 9 | 明文用 `http://<authority>:<宿主端口>/`，HTTPS 用 `https://<authority>/` | 两条路各自可用 | `https://…:<明文端口>` **必然失败**：TLS 打到了明文监听上 |
+
+**明文通道的两个配对关系（都踩过）**
+
+- 端口映射的**容器侧固定 80**（站点地址不带端口 ⇒ Caddy 在容器内监听 80）；**宿主侧随便挑**。
+  把宿主端口写进 `DSH_SITE_ADDRESS` 会同时移动 HTTPS 监听并让明文站点错位 ✗
+- `DSH_TRUSTED_HOSTS` 写**无端口** authority：无端口条目按主机名比较，一个条目覆盖 443 / 80 / 任意宿主端口 ✔
+- 白名单判的是**客户端出口 IP**：验证必须从客户端做 ✔（在服务器上 curl 会经 docker 网桥，得到 403 属正常）
+- **HSTS 只对域名生效**：用 IP 访问时两条路可长期并存；若以后改用域名，一旦 HTTPS 访问成功，浏览器会把 `http://域名` 强制升级一年 ⇒ 明文那条路消失（Caddyfile 里 HSTS 头旁边也写了）
 ## 常用运维
 
 ```bash
