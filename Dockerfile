@@ -230,11 +230,7 @@ RUN curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" -o /tmp/nodeso
 # match the CLI, and `next` is 0.1.5-rc.2, so it would also drift ahead.
 RUN npm install --global --no-fund --no-audit \
       "@deepseek-ai/dsh@${DSH_VERSION}" \
-      "@deepseek-ai/dsh-base@${DSH_VERSION}" \
       "@deepseek-ai/dsh-session-title-llm@${DSH_VERSION}" \
-      "@deepseek-ai/dsh-sandbox-local@${DSH_VERSION}" \
-      "@deepseek-ai/dsh-bash-sandbox@${DSH_VERSION}" \
-      "@deepseek-ai/dsh-fs-sandbox@${DSH_VERSION}" \
       pnpm
 
 # ── why those extra pins exist ──────────────────────────────────────────────
