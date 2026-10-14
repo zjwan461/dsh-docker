@@ -168,6 +168,47 @@ if [[ -n "${DSH_BUNDLED_SKILL_DIR:-}" ]]; then
   fi
 fi
 
+# ── 1c. profile plugins ─────────────────────────────────────────────────────
+#
+# dsh installs the web profile's plugins at boot (installFailLoud -> pnpm). The
+# image ships a complete copy so that the first start does not need the npm
+# registry FROM INSIDE this container and cannot leave a half-written tree —
+# which is what produces "plugin(s) failed to load:
+# @deepseek-ai/dsh-sandbox-local; could not be resolved" and a restart loop.
+#
+# Seeding rules, in order:
+#   * node_modules absent           -> seed it
+#   * fewer packages than the image -> a previous install was partial; replace
+#     node_modules only (never the profile's own *.yml, and never the user's
+#     cordis.patch.yml, which holds plugin selections)
+#   * otherwise                     -> leave it alone
+#
+# `cp -a` matters: pnpm's tree is symlinks into .pnpm/, and a copy that drops or
+# resolves them produces exactly the failure this prevents.
+PROFILE_SEED=/opt/dsh-profile/profiles
+PROFILE_RUNTIME="${DSH_HOME}/profiles"
+if [[ "$PROFILE_RUNTIME" != "/profiles" && "$PROFILE_RUNTIME" != "profiles" ]]; then
+  if [[ -d "$PROFILE_SEED/node_modules/@deepseek-ai" ]]; then
+    mkdir -p "$PROFILE_RUNTIME/web"
+    for skeleton in package.json pnpm-workspace.yaml cordis.yml; do
+      if [[ ! -e "$PROFILE_RUNTIME/web/$skeleton" && -e "$PROFILE_SEED/web/$skeleton" ]]; then
+        cp -a "$PROFILE_SEED/web/$skeleton" "$PROFILE_RUNTIME/web/$skeleton"
+      fi
+    done
+    seed_count="$(ls -1 "$PROFILE_SEED/node_modules/@deepseek-ai" 2>/dev/null | wc -l)"
+    have_count="$(ls -1 "$PROFILE_RUNTIME/node_modules/@deepseek-ai" 2>/dev/null | wc -l)"
+    if [[ "$have_count" -lt "$seed_count" ]]; then
+      log "seeding web profile plugins from the image ($have_count -> $seed_count packages)"
+      rm -rf "$PROFILE_RUNTIME/node_modules"
+      cp -a "$PROFILE_SEED/node_modules" "$PROFILE_RUNTIME/node_modules"
+    else
+      log "web profile plugins present ($have_count packages)"
+    fi
+  else
+    warn "this image carries no pre-installed profile (INSTALL_PROFILE=0), so dsh will install one at boot and that needs npm registry access from inside this container."
+  fi
+fi
+
 mkdir -p "$OVERLAY_DIR" || die "cannot create $OVERLAY_DIR"
 # mkdir -p succeeds when the directory already exists but is not writable (for
 # example a .runtime/ left behind by an earlier run as root), and the failing
@@ -205,6 +246,16 @@ if [[ -n "$stray" ]]; then
   warn "the workspace looks like the deployment directory: it contains${stray}"
   warn "DSH_WORKSPACES is pointing at the deployment instead of a projects directory. The agent would be able to rewrite the deployment, and DSH loads <workspace>/.env as a launch environment layer for every session."
   warn "Point DSH_WORKSPACES at a dedicated directory, e.g. DSH_WORKSPACES=/srv/projects/dsh-work"
+fi
+
+# The npm global root is a build-time fact, not a constant: NodeSource installs
+# into /usr/lib/node_modules on this base while other layouts use
+# /usr/local/lib/node_modules. doctor.mjs reads DSH_GLOBAL_ROOT, and a wrong
+# value makes it report "cannot locate the Landlock launcher module" even though
+# the launcher is right there. Point it at what the build recorded.
+if [[ -r /tmp/dsh-global-root.path ]]; then
+  DSH_GLOBAL_ROOT="$(cat /tmp/dsh-global-root.path)"
+  export DSH_GLOBAL_ROOT
 fi
 
 # ── 2. doctor ───────────────────────────────────────────────────────────────

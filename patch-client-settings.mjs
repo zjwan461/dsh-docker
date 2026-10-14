@@ -65,7 +65,6 @@
 import { readFileSync, writeFileSync, readdirSync, statSync, realpathSync, renameSync, unlinkSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { createRequire } from 'node:module';
-import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 
 const MARKER = 'PATCHED by dsh-docker';
@@ -221,21 +220,31 @@ for (const file of found.values()) {
     'The server still enforces the Host/Origin fence and the launch-token cookie. */$2';
   const next = source.replace(ANCHOR, replacement);
 
-  // Install by REPLACING the directory entry (temp file + rename), never by
-  // writing in place: pnpm hard-links package files out of its content-addressed
-  // store, so an in-place write would corrupt that shared copy. A rename leaves
-  // the store untouched and is atomic.
-  const staged = join(tmpdir(), `dsh-client-patch-${process.pid}-${patched}.js`);
+  // Stage NEXT TO the target and rename over it. Two reasons: pnpm hard-links
+  // package files out of a content-addressed store, so writing in place would
+  // corrupt that shared copy; and /tmp may be unwritable or on another
+  // filesystem, which turns a simple replace into an EACCES or EXDEV. Staging in
+  // the target's own directory also makes the failure unambiguous — if this
+  // cannot write, the PROFILE DIRECTORY is what the runtime uid lacks permission
+  // for, and the message says so instead of blaming the patch.
+  const staged = join(dirname(file), `.dsh-client-patch-${process.pid}.tmp`);
   try {
     writeFileSync(staged, next);
-    const parsed = syntaxCheck(staged);
-    if (parsed !== true) {
-      problems.push(`${file}: the patched bundle does not parse (${parsed}); left untouched`);
-      continue;
-    }
+  } catch (error) {
+    const uid = typeof process.getuid === 'function' ? process.getuid() : '?';
+    problems.push(`${file}: cannot stage a file in ${dirname(file)} (${error.code ?? error.message}) — that directory is not writable by uid ${uid}`);
+    continue;
+  }
+  const parsed = syntaxCheck(staged);
+  if (parsed !== true) {
+    problems.push(`${file}: the patched bundle does not parse (${parsed}); left untouched`);
+    try { unlinkSync(staged); } catch { /* nothing to clean */ }
+    continue;
+  }
+  try {
     renameSync(staged, file);
   } catch (error) {
-    problems.push(`${file}: could not install the patch (${error.code ?? error.message})`);
+    problems.push(`${file}: cannot replace the target (${error.code ?? error.message})`);
     try { unlinkSync(staged); } catch { /* nothing to clean */ }
     continue;
   }

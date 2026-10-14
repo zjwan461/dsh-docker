@@ -19,6 +19,10 @@ x-dsh-image: &dsh-image
       # .env to build a leaner image. See README 「镜像里预装了什么」 for the cost.
       INSTALL_OFFICE: ${INSTALL_OFFICE:-1}
       INSTALL_PYTHON_DOCS: ${INSTALL_PYTHON_DOCS:-1}
+      # Pre-install the web profile's plugins into the image, so the first boot
+      # does not need npm registry access from inside the container. See README
+      # 「预装的 web profile」.
+      INSTALL_PROFILE: ${INSTALL_PROFILE:-1}
   image: dsh:${DSH_VERSION:-0.1.5-rc.1}
 
 services:

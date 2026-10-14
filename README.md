@@ -50,7 +50,7 @@ Caddy 已经同时承担了**域名虚拟主机、TLS 终结、反向代理**三
 | `.env.example` | 所有可调项 |
 | `verify.sh` | 在**物理机**上逐层验证 GUI 链路（DNS→TLS→Caddy→信任围栏→token→cookie→/api→WebSocket），失败项直接给出排查命令 |
 | `data/dsh/settings.yaml` | 服务端配置（提供方/端点/模型），mock 值可直接用。位于 `./data/dsh` 目录挂载内（容器路径 `/data/dsh/settings.yaml`）：**宿主编辑会热重载，Models 页保存也会落到这个文件** |
-| `patch-client-settings.mjs` | 给浏览器 bundle 打补丁，让域名访问时设置页也能读写宿主文档（见「设置页为什么现在能用」）。**由 entrypoint 在 profile 组合完成之后应用**——客户端插件包属于 profile 而不是 dsh CLI，构建期还不存在。幂等，每次启动重放 |
+| `patch-client-settings.mjs` | 给浏览器 bundle 打补丁，让域名访问时设置页也能读写宿主文档（见「设置页为什么现在能用」）。**构建期打在镜像预装的 profile 上（锚点不匹配即构建失败）**；entrypoint 每次启动再重放一次，覆盖运行时重装的 profile |
 | `workspaces/` | 工作区 bind mount 源目录 |
 | `skills/` | 内置（bundled）技能目录；构建时 COPY 到镜像 `/opt/dsh-skills`。**目前故意为空**，机制已就绪 |
 | `LICENSE` | Apache License 2.0 全文（与官方文本逐字节一致） |
@@ -94,6 +94,14 @@ Caddy 已经同时承担了**域名虚拟主机、TLS 终结、反向代理**三
 | `INSTALL_PYTHON_DOCS=1` | `python-pptx` `python-docx` `openpyxl` `Pillow` | 约 50MB |
 
 设成 `0` 可以瘦身，但**必须重新构建**（`docker compose build && docker compose up -d`）。
+
+### 预装的 web profile（默认开）
+
+`INSTALL_PROFILE=1` 会在**构建期**用 dsh 自己把 `web` profile 的插件（约 250 个包）装进镜像的 `/opt/dsh-profile`，启动时由 entrypoint 种子化到 `$DSH_HOME/profiles`：`cp -a` 保留 pnpm 的符号链接结构；若运行时那份不完整（包数少于镜像），则整体替换 `node_modules`——但**不碰** `cordis.patch.yml` 等用户状态。
+
+**为什么这么做**：dsh 在**每次启动**都会校验/安装 profile（`installFailLoud`）。那要求**容器内**能访问 npm registry（构建期的网络不等于容器的网络），而且装到一半会留下坏树导致重启循环。放到构建期就都没有了，首启也快得多。设 `INSTALL_PROFILE=0` 可退回运行时安装。
+
+镜像里还有一道**启动冒烟测试**：构建时真的跑一次 `dsh web --no-open`，60 秒内自己退出就算失败。因为 `--dump-config` 只组合配置、**不 import 插件模块**，它在插件树坏掉时依然「成功」——那正是坏 profile 溜到线上并变成重启循环的原因。
 
 LibreOffice 有两点值得说明：
 
@@ -277,7 +285,11 @@ isLoopback: transport?.ownsHost === true || pageLocation === void 0
 
 补丁失败**只告警、不致命**：没有它整个 GUI 照常工作，只有 Models / General 设置页退化成 `settings are available in this browser`。
 
-> **为什么不在构建期做**（踩过的坑，值得记下）：最初的设计就是在 Dockerfile 里 `RUN` 这个脚本，并且**锚点不匹配就让构建失败**。结果构建直接报 `no client bundle found`——因为**客户端插件包不属于 npm CLI，而属于 profile**：`npm i -g @deepseek-ai/dsh` 装出来的树里没有它们，它们由 pnpm 在**首次组合 profile** 时装进 `$DSH_HOME/profiles/`。构建期根本没有可打补丁的文件，只能在启动、组合完成之后打。
+> **为什么镜像里要预装 profile**（踩过的坑，值得记下）：最初的设计是在 Dockerfile 里 `RUN` 这个脚本并且**锚点不匹配就让构建失败**。结果构建直接报 `no client bundle found`——因为**客户端插件包不属于 npm CLI，而属于 profile**：`npm i -g @deepseek-ai/dsh` 装出来的树里没有它们，它们由 dsh 在**首次启动**时用 pnpm 装进 `$DSH_HOME/profiles/`。
+>
+> 于是脚本被挪到启动期。但那样暴露了更大的问题：**首启要求容器内能访问 npm registry**（dsh 还会把环境里的 `HTTP_PROXY`/`HTTPS_PROXY` 装成自己的代理，`installProxyFromEnvironment`），而且**装到一半会留下坏树**，表现为 `plugin(s) failed to load: @deepseek-ai/dsh-sandbox-local; could not be resolved` + 重启循环。
+>
+> 最终方案是**把 profile 预装进镜像**（`INSTALL_PROFILE=1`，默认开）：安装发生在构建期，那里的网络已被证明可用（同一个构建刚装完 dsh/pnpm）；entrypoint 再把结果种子化到 `$DSH_HOME`。补丁因此可以**在构建期打在预装的 profile 上**并恢复硬保证，启动期那次应用只作为兜底。
 
 ### 这不是安全回退，但确实放宽了一件事
 
@@ -482,6 +494,8 @@ docker compose exec dsh dsh plugin --profile web remove <package>
 | `dsh` 容器报 `plugin tree failed to load` / `Cannot find package` | 先看堆栈里有没有 **`/snapshot/deepseek-harness/...`** 前缀 —— 那说明跑的是**另一个**同名的 `dsh`（单文件 Node 可执行体，只有最小 profile、没有 `web` profile），而不是 npm CLI。历史上这个冲突来自 Python SDK 安装的 runtime wheel，**现在镜像里已不含 SDK**，理论上不会再出现；entrypoint 仍显式解析 npm CLI（`DSH_NPM_BIN` → 构建期写下的 `/tmp/dsh-npm-bin.path` → `npm root -g` → 常见前缀），启动时打印 `dsh CLI: ...`，可用 `DSH_CLI` 覆盖。 |
 | 改了 `DSH_BIND_PORT` 后不通 | `DSH_UPSTREAM` 会跟着变，检查 `docker compose config` 里 caddy 的 `DSH_UPSTREAM` 与 healthcheck。 |
 | 流式响应「卡住」直到最后才一次性吐完 | 检查是否有中间件在缓冲 SSE：`Caddyfile` 的 site 块必须有 `flush_interval -1`（少了它，GUI 的事件流会被攒到最后才发）。 |
+
+| `plugin(s) failed to load: @deepseek-ai/dsh-sandbox-local; could not be resolved`（并伴随重启循环）| **profile 插件树不完整**，不是权限问题就是安装没装完。`$DSH_HOME/profiles` 是 dsh 启动时用 pnpm 装的，装一半就会这样。先看宿主侧（A2 之后状态就在眼前）：`ls data/dsh/profiles/node_modules/@deepseek-ai \| wc -l`（完整约 250）。修法：镜像预装（`INSTALL_PROFILE=1`，默认）后重启会自动种子化/修复；或手动重装并把 pnpm 的报错原样打出来：`docker compose run --rm --entrypoint sh dsh -lc 'node "$(cat /tmp/dsh-npm-bin.path)" plugin --profile web install'`——若它失败，通常就是**容器内到 npm registry 的出网**问题（注意容器会继承 `HTTP_PROXY`/`HTTPS_PROXY`）。 |
 
 ## 安全边界（务必知悉）
 
