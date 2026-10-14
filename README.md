@@ -21,7 +21,7 @@ Caddy 已经同时承担了**域名虚拟主机、TLS 终结、反向代理**三
 - **想用公司 CA 的证书**：不需要 nginx，走下面的 Option B，把证书文件喂给 Caddy 即可。证书由谁签发 ≠ 必须由谁托管。
 - **只有一种情况值得引入 nginx**：TLS 必须在**集中入口**（已有的 nginx / F5 / LB）终结。那时的正确做法是**把 compose 里的 caddy 服务整个删掉**，让 nginx 直接反代 dsh，而不是两层叠加。届时必须做到五件事：`proxy_set_header Host $host`（nginx 默认是 `$proxy_host`，会导致 /api 信任围栏 403）、`proxy_buffering off`（SSE）、WebSocket upgrade 头、`client_max_body_size` 提到 300m 以上（否则上传 413）、以及明文那一跳只允许走 loopback 或 compose 内网。
 
-## 为什么是这样设计的（都是对着 `@deepseek-ai/dsh@0.1.5-rc.1` 源码核过的）
+## 为什么是这样设计的（都是对着 `@deepseek-ai/dsh` 的 0.1.5-rc.x / 0.2.0-rc.x 源码核过的）
 
 | 事实 | 由此产生的设计 |
 |---|---|
@@ -479,7 +479,7 @@ docker compose exec dsh dsh plugin --profile web remove <package>
 
 > ℹ️ 会话日志上传在这条链路上是**默认关闭**的，不必额外处理。可核实的依据：`dsh-session-log-deepseek` 的 schema 是 `enabled: z.boolean().default(false)`，其 `apply` 在 `enabled !== true` 时直接返回，而 base bundle 插入该行时没有给任何 config。
 >
-> 注意：仓库 master 上的 CLI 参考写的却是「default-on DeepSeek session-log upload」，与 `0.1.5-rc.1` 实际行为矛盾（很可能 master 已经演进）。**升级 `DSH_VERSION` 后请重新核对一次**：确认方式是 `docker compose exec dsh dsh plugin --profile web why @deepseek-ai/dsh-session-log-deepseek` 之外，直接看启动后的 `dsh web --dump-config | grep -A2 session-log-deepseek`，如果出现 `enabled: true`，就在 `$DSH_HOME/profiles/web/cordis.patch.yml` 里把它改回 `false`（该文件初始内容是 `[]`，编辑时要**替换**它而不是追加）。
+> 注意：仓库 master 上的 CLI 参考写的却是「default-on DeepSeek session-log upload」，与 `0.1.5-rc.x` 实际行为矛盾（很可能 master 已经演进）。**升级 `DSH_VERSION` 后请重新核对一次**：确认方式是 `docker compose exec dsh dsh plugin --profile web why @deepseek-ai/dsh-session-log-deepseek` 之外，直接看启动后的 `dsh web --dump-config | grep -A2 session-log-deepseek`，如果出现 `enabled: true`，就在 `$DSH_HOME/profiles/web/cordis.patch.yml` 里把它改回 `false`（该文件初始内容是 `[]`，编辑时要**替换**它而不是追加）。
 
 ## 排障
 
@@ -503,6 +503,8 @@ docker compose exec dsh dsh plugin --profile web remove <package>
 | 流式响应「卡住」直到最后才一次性吐完 | 检查是否有中间件在缓冲 SSE：`Caddyfile` 的 site 块必须有 `flush_interval -1`（少了它，GUI 的事件流会被攒到最后才发）。 |
 
 | `plugin(s) failed to load: @deepseek-ai/dsh-sandbox-local; could not be resolved`（并伴随重启循环）| **profile 的投影过期/残缺**。`$DSH_HOME/profiles` 是 dsh 启动时用 pnpm 装的，装一半就会这样。先看宿主侧（A2 之后状态就在眼前）：`ls data/dsh/profiles/node_modules/@deepseek-ai \| wc -l`（完整约 250）。`$DSH_HOME/profiles/node_modules` 是 dsh 启动时从**安装树**投影出来的，profile 自身没有依赖，所以**没有任何东西会重建它**。对照包数：`ls data/dsh/profiles/node_modules/@deepseek-ai | wc -l`（完整应与安装树同量级，约 250）。修法：`rm -rf data/dsh/profiles/node_modules && docker compose restart dsh`。**chown 不管用**（坏的是内容）。若**全新 home 首启**就失败，则是镜像本身有问题——看构建期冒烟测试的输出。 |
+
+| 构建期 `ERESOLVE could not resolve`，或启动报 `plugin(s) failed to load: … could not be resolved` | **预发布版本漂移**。dsh 各包之间用 `^0.1.5-rc.1` 这类范围互相依赖，而 npm 会解析到**该范围里最新的预发布版**：CLI 停在 rc.1，`dsh-base` 却浮到 rc.3，树变成 rc.1/rc.3 混装 ⇒ 部分插件包不在安装树**顶层** ⇒ dsh 的 profile 投影看不到它 ⇒ 启动必失败（而 `--dump-config` 只组合配置、不 import 模块，所以自检照样通过）。**规则：`DSH_VERSION` 用该系列里最新的那个**——范围没有更新的可浮，自然就稳定（semver 还会把 `^0.1.5-rc.3` 限制在 0.1.5 tuple 内，`0.1.6-alpha.x` 进不来）。构建期的版本断言会点名漂移的包。 |
 
 ## 安全边界（务必知悉）
 

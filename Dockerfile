@@ -29,12 +29,12 @@
 #     is loud, never silent.
 #
 # Build (context is the repository root):
-#   docker build -t dsh:0.1.5-rc.1 .
+#   docker build -t dsh:0.1.5-rc.3 .
 
 FROM python:3.11-slim-bookworm
 
 ARG NODE_MAJOR=22
-ARG DSH_VERSION=0.1.5-rc.1
+ARG DSH_VERSION=0.1.5-rc.3
 ARG DSH_UID=1000
 ARG DSH_GID=1000
 # Absolute path of the npm dsh CLI entry file. Deliberately NOT set here: the
