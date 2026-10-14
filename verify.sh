@@ -46,6 +46,12 @@ expect() { # label expected actual
 # ---------------------------------------------------------------- target ----
 
 SITE="${DSH_SITE_ADDRESS:-$(grep -m1 '^DSH_SITE_ADDRESS=' .env 2>/dev/null | cut -d= -f2-)}"
+# DSH_SITE_ADDRESS holds an AUTHORITY (host or IP, no scheme); this script talks
+# HTTPS to it. A full URL is still accepted, so older .env files keep working.
+case "$SITE" in
+  http://*|https://*|"") : ;;
+  *) SITE="https://${SITE}" ;;
+esac
 if [[ -z "${SITE:-}" ]]; then
   echo "ERROR: DSH_SITE_ADDRESS is unset and .env has no DSH_SITE_ADDRESS." >&2
   echo "       Run this next to compose.yaml, or export DSH_SITE_ADDRESS first." >&2

@@ -156,7 +156,7 @@ LibreOffice 有两点值得说明：
 `.env` 已按这个域名预置好（与 `.env.example` 同一份内容），需要动的只有 `DEEPSEEK_API_KEY`：
 
 ```ini
-DSH_SITE_ADDRESS=https://dsh.example.com
+DSH_SITE_ADDRESS=dsh.example.com          # 只写 authority，不含 https://
 DSH_TRUSTED_HOSTS=dsh.example.com
 DSH_PUBLIC_PORT=443
 ```
@@ -236,7 +236,7 @@ DSH 的登录 token 每次进程启动重新随机生成，只在日志里出现
 docker compose logs dsh | grep -o 'https\?://[^ ]*token=[A-Za-z0-9._-]*' | tail -1
 ```
 
-把打印出的 URL 里的 `http://127.0.0.1:3080` 换成你的 `DSH_SITE_ADDRESS`：
+把打印出的 URL 里的 `http://127.0.0.1:3080` 换成 `https://` + 你的 `DSH_SITE_ADDRESS`（该变量只存 authority，scheme 在 Caddyfile 里）：
 
 ```
 https://dsh.example.com/?token=xxxxx

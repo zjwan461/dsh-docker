@@ -134,8 +134,12 @@ services:
         condition: service_started
         required: false
     environment:
-      DSH_SITE_ADDRESS: ${DSH_SITE_ADDRESS:?set DSH_SITE_ADDRESS in .env, e.g. https://dsh.example.com}
+      DSH_SITE_ADDRESS: ${DSH_SITE_ADDRESS:?set DSH_SITE_ADDRESS in .env (authority only, no scheme), e.g. dsh.example.com}
       DSH_UPSTREAM: dsh:${DSH_BIND_PORT:-3080}
+      # Who may use the plaintext :80 listener, once you publish it. Addresses outside
+      # this list get 403, and the default is loopback only — so a published :80
+      # answers nobody until you name your clients.
+      DSH_HTTP_ALLOWED_RANGES: "${DSH_HTTP_ALLOWED_RANGES:-127.0.0.1/32 ::1/128}"
       # Docker injects HTTP_PROXY/HTTPS_PROXY into containers from the client or
       # daemon proxy config, and a build can bake them into the image as ENV.
       # Caddy's reverse_proxy honors those variables, so the upstream request
@@ -169,10 +173,12 @@ services:
     # warning in the Caddyfile.
     #
     # Running BOTH listeners at once (HTTPS on 443 as configured, plaintext on 80):
-    #   1. uncomment the site at the END of Caddyfile and set its address there;
-    #   2. uncomment the :80 mapping just below;
+    #   1. uncomment the :80 mapping just below;
+    #   2. set DSH_HTTP_ALLOWED_RANGES to the addresses that may use it;
     #   3. list EVERY authority you browse in DSH_TRUSTED_HOSTS, comma-separated:
     #        DSH_TRUSTED_HOSTS=dsh.internal,192.168.1.20
+    # The site itself already exists in Caddyfile and follows DSH_SITE_ADDRESS, so
+    # there is nothing to edit there.
     # Caddy permits this because the global block sets `auto_https disable_redirects`:
     # it therefore never claims :80 for its own HTTP->HTTPS redirect listener, which
     # leaves that port free for a site of our own. Two consequences worth knowing:
