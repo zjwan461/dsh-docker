@@ -230,8 +230,37 @@ RUN curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" -o /tmp/nodeso
 # match the CLI, and `next` is 0.1.5-rc.2, so it would also drift ahead.
 RUN npm install --global --no-fund --no-audit \
       "@deepseek-ai/dsh@${DSH_VERSION}" \
+      "@deepseek-ai/dsh-base@${DSH_VERSION}" \
       "@deepseek-ai/dsh-session-title-llm@${DSH_VERSION}" \
+      "@deepseek-ai/dsh-sandbox-local@${DSH_VERSION}" \
+      "@deepseek-ai/dsh-bash-sandbox@${DSH_VERSION}" \
+      "@deepseek-ai/dsh-fs-sandbox@${DSH_VERSION}" \
       pnpm
+
+# ── why those extra pins exist ──────────────────────────────────────────────
+# PRERELEASE RANGES FLOAT, and that broke a deployment. `@deepseek-ai/dsh@0.1.5-rc.1`
+# depends on `@deepseek-ai/dsh-base@^0.1.5-rc.1`, and npm resolves the NEWEST
+# prerelease inside that range — dsh-base 0.1.5-rc.3 in practice — while the CLI
+# stays rc.1. The newer bundle declares its sandbox packages at `^0.1.5-rc.3`, and
+# three of them ended up absent from the tree:
+#
+#     @deepseek-ai/dsh-bash-sandbox   ^0.1.5-rc.3  MISSING
+#     @deepseek-ai/dsh-fs-sandbox     ^0.1.5-rc.3  MISSING
+#     @deepseek-ai/dsh-sandbox-local  ^0.1.5-rc.3  MISSING
+#
+# The web profile then asks to load a plugin the installation does not carry, and
+# because the profile's own package.json declares no dependencies there is nothing
+# that can fill the gap — the GUI dies on every start with
+#     plugin(s) failed to load: @deepseek-ai/dsh-sandbox-local; could not be resolved
+#
+# A TOP-LEVEL EXACT PIN defeats the float: the range is satisfied by the pinned
+# version instead of by the newest prerelease. That is the same mechanism that
+# makes the @deepseek-ai/dsh-session-title-llm pin above work, and it is why every
+# entry here is spelled out rather than left to a range.
+#
+# If one of these pins has no published version, the BUILD fails with npm's
+# "No matching version found" — which is the honest answer, and the fix at that
+# point is to move DSH_VERSION to a release whose whole tree is consistent.
 
 # ── persistent roots ────────────────────────────────────────────────────────
 # /data/dsh   every piece of GUI state (profiles, sessions, storages,
@@ -330,7 +359,7 @@ RUN set -eux; \
     echo "--- npm $(npm --version) from $(command -v npm), npm root -g: $(npm root -g) ---"; \
     echo "--- plugin packages under ${TREE}: $(ls "$TREE" 2>/dev/null | wc -l) ---"; \
     missing=""; \
-    for p in dsh-base dsh-web-app dsh-sandbox-local node-addon-system; do \
+    for p in dsh-base dsh-web-app dsh-sandbox-local dsh-bash-sandbox dsh-fs-sandbox node-addon-system; do \
       [ -d "${TREE}/${p}" ] || missing="${missing} ${p}"; \
     done; \
     if [ -n "${missing}" ]; then \
@@ -340,7 +369,20 @@ RUN set -eux; \
     fi; \
     echo "--- sandbox / addon packages present ---"; \
     ls "$TREE" | grep -iE 'sandbox|addon' || true; \
-    echo 'the global install carries the bundles the web profile needs'
+    mismatched=""; \
+    echo "--- versions (every one of these must equal DSH_VERSION=${DSH_VERSION}) ---"; \
+    for p in dsh-base dsh-web-app dsh-sandbox-local dsh-bash-sandbox dsh-fs-sandbox dsh-pwsh-sandbox dsh-sandbox-policy; do \
+      v="$(node -p "require('${TREE}/${p}/package.json').version" 2>/dev/null || echo '?')"; \
+      echo "  ${p} ${v}"; \
+      [ "${v}" = "${DSH_VERSION}" ] || mismatched="${mismatched} ${p}@${v}"; \
+    done; \
+    if [ -n "${mismatched}" ]; then \
+      echo "ERROR: these packages floated away from DSH_VERSION=${DSH_VERSION}:${mismatched}"; \
+      echo 'Prerelease ranges resolve to the NEWEST prerelease, so the CLI and its'; \
+      echo 'bundles can disagree with each other. Pin them all explicitly.'; \
+      exit 1; \
+    fi; \
+    echo 'the global install carries the bundles the web profile needs, all at one version'
 
 # ── deployment patch: settings UI on a remote origin ────────────────────────
 # dsh decides where the settings document lives in the BROWSER:
