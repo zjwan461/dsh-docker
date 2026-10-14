@@ -52,6 +52,7 @@ Caddy 已经同时承担了**域名虚拟主机、TLS 终结、反向代理**三
 | `data/dsh/settings.yaml` | 服务端配置（提供方/端点/模型），mock 值可直接用。位于 `./data/dsh` 目录挂载内（容器路径 `/data/dsh/settings.yaml`）：**宿主编辑会热重载，Models 页保存也会落到这个文件** |
 | `patch-client-settings.mjs` | 构建期给浏览器 bundle 打补丁，让域名访问时设置页也能读写宿主文档（见「设置页为什么现在能用」）。锚点不匹配则**构建失败**，容器启动时再自检一次 |
 | `workspaces/` | 工作区 bind mount 源目录 |
+| `skills/` | 内置（bundled）技能目录；构建时 COPY 到镜像 `/opt/dsh-skills`。**目前故意为空**，机制已就绪 |
 | `LICENSE` | Apache License 2.0 全文（与官方文本逐字节一致） |
 
 ## 前置条件
@@ -458,6 +459,71 @@ docker compose exec dsh dsh plugin --profile web remove <package>
 1. **属主**：宿主目录属于别的 uid（实测 10001）时，最省事的是把 `.env` 的 `DSH_UID/DSH_GID` 设成该属主——构建参数会把它带进镜像，`./data/dsh` 这个宿主目录再 chown 一次即可。entrypoint 会打印实际属主与两种修法。
 2. 首次浏览器访问的证书信任：本项目已决定**接受自签警告、点一次继续**（前提是受管浏览器未禁用 `SSLErrorOverrideAllowed`）。
 3. **本轮改动需要一次构建验证**：Dockerfile / entrypoint 以 Linux 上已跑通的版本为基线，本轮新增的是「构建期补丁 + 断言」与 python_server 相关删除，因此要在服务器上 `docker compose build` 一次。构建期会跑补丁断言与 `--profile web --dump-config`，失败点都落在构建阶段，而不是首次打开页面时。
+
+## 内置技能（机制已就绪，暂不带技能）
+
+镜像里**已经装好了「内置技能」的机制**，但**故意一个技能都不带**。想加的时候，把技能放进仓库的 `skills/`，重新构建即可。
+
+### 机制是什么
+
+`dsh-skill-filesystem` 把它当作一个独立的技能根：`DSH_BUNDLED_SKILL_DIR=/opt/dsh-skills`（Dockerfile 里设的），`source: "bundled"`、`trustedHost: true`、`rank: 600`。三个要点：
+
+- **`trustedHost: true` 是必需的**：它的 `SKILL.md` 是**绕过沙箱直读**的（`readSkillText(..., trustedHost)`）。技能放在工作区之外（`/opt/dsh-skills`），沙箱化的文件系统读不到，只有 trusted 根能读——**所以别用 `customSkillDirs` 放镜像内置技能**。
+- **内置技能优先级最低**：rank 是**升序取小**（`left.rank - right.rank`），bundled = 600 是最大值 ⇒ 项目技能、用户技能同名时**覆盖内置**。这正是内置技能应有的语义。
+- **空目录是合法状态**：发现逻辑把「没有 `SKILL.md` 的子目录」视为不存在，不会报错；entrypoint 每次启动打印一行计数。
+
+### 技能可以放哪：六个根，按优先级
+
+| 优先级 | source | 路径 | 备注 |
+|---|---|---|---|
+| 1 | `project-dsh` | `<项目根>/.dsh/skills` | 项目根 = 从 cwd **向上找含 `.git`** 的目录 |
+| 2 | `project-agents` | `<项目根>/.agents/skills` | 同上 |
+| 3 | `custom` | profile 的 `customSkillDirs` | 任意目录，可配多个 |
+| 4 | `user-dsh` | `$DSH_HOME/skills` → 容器 `/data/dsh/skills`，宿主 `<repo>/data/dsh/skills` | **宿主可改、热重载**；带 `skipSystem`（忽略其下 `.system`） |
+| 5 | `user-agents` | `~/.agents/skills`（`DSH_AGENTS_HOME` 可改） | |
+| 6 | **`bundled`** | **`/opt/dsh-skills`** | 本文讲的这个 |
+
+想临时加技能又不想重建镜像：把 `compose.yaml` 里那行注释打开（`- ./skills:/opt/dsh-skills:ro`），宿主目录会**遮蔽**镜像里那份，并且**热重载**。
+
+### 一个技能的最小结构
+
+```
+skills/
+└── my-skill/
+    ├── SKILL.md          ← 必须有；该目录即 resourceBase
+    ├── scripts/…         ← 可选
+    └── assets/…          ← 可选
+```
+
+`SKILL.md` 的 frontmatter 至少要 `name` 和 `description`：
+
+```yaml
+---
+name: my-skill            # 技能名（取自 frontmatter，不必与目录名相同）
+description: 一行说明，出现在技能目录里
+whenToUse: 可选，给模型的提示
+invocation:
+  modelInvocable: true
+  userInvocable: true
+---
+正文……
+```
+
+（`name` 不必等于目录名：框架自带的技能就是解压到随机临时目录、而 frontmatter 里写固定名字的。但 `name` 必须符合技能名规则。）
+
+也支持单文件形式：`/opt/dsh-skills/my-skill.md`（此时 resourceBase 是根目录本身）。
+
+> ⚠️ **别在这个目录里放没有 frontmatter 的 `.md`**（比如随手一个 `README.md`）：发现逻辑会把根目录下每个 `.md` 都当成技能候选，解析不出来就**每次扫描都打一条 warning**。所以本仓库的说明写在这里，而不是 `skills/` 里。
+
+### 怎么确认机制是活的
+
+```bash
+docker compose logs dsh | grep 'built-in skills'
+#   空着时：   [dsh] built-in skills: none in /opt/dsh-skills (mechanism ready; see README: built-in skills)
+#   加了之后： [dsh] built-in skills: 1 discovered in /opt/dsh-skills
+```
+
+技能目录变更由 watcher 捕获并热重载（`skills/change` 事件）。`skills/` 下的内容**会随仓库提交**——这是有意的：内置技能属于这个项目的一部分。
 
 ## 许可证
 

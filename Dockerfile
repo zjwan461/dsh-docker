@@ -50,6 +50,20 @@ ENV NPM_CONFIG_FUND=false \
     DSH_GLOBAL_ROOT=/usr/local/lib/node_modules \
     DSH_NPM_BIN_DISCOVERY_FILE=/tmp/dsh-npm-bin.path
 
+# Built-in ("bundled") skills. This path is registered by
+# @deepseek-ai/dsh-skill-filesystem as the bundled skill root — source
+# "bundled", trustedHost (its SKILL.md is read OUTSIDE the agent's sandbox, which
+# is what makes a root outside the workspace readable at all), and rank 600, the
+# highest rank number. Ranks sort ascending, so bundled is the LOWEST precedence:
+# a project or user skill of the same name overrides it — the behaviour you want
+# for built-ins.
+#
+# It ships EMPTY on purpose: the mechanism is the deliverable. Drop a skill in,
+# rebuild, and it is live. An empty root is a valid state — discovery treats a
+# subdirectory without SKILL.md as absent, and entrypoint.sh reports the count at
+# every start. See compose.yaml for the no-rebuild alternative and README 「内置技能」.
+ENV DSH_BUNDLED_SKILL_DIR=/opt/dsh-skills
+
 # apt: curl for the healthchecks and verify.sh, git because the agent is a
 # coding agent, openssh-client for cloning over SSH, less for `git log`, procps
 # for the agent's own process inspection, tini so PID 1 forwards SIGTERM, and
@@ -116,6 +130,19 @@ COPY patch-client-settings.mjs /usr/local/bin/dsh-patch-client-settings.mjs
 RUN chmod 0755 /usr/local/bin/dsh-entrypoint \
  && chmod 0755 /usr/local/bin/dsh-patch-client-settings.mjs \
  && chmod 0644 /usr/local/bin/dsh-doctor.mjs
+
+# ── built-in skills (empty by default) ──────────────────────────────────────
+# One directory per skill, each containing SKILL.md:
+#   /opt/dsh-skills/<name>/SKILL.md      (+ optional scripts/, assets/, reference/)
+# A single <name>.md in the root also works. Frontmatter needs at least `name`
+# and `description`; a .md WITHOUT frontmatter is ignored and logged as a warning
+# on every scan, so do not park a plain README.md here.
+#
+# a+rX rather than trusting the build context: COPY preserves the host's modes,
+# so a restrictive umask would otherwise make the skills unreadable to the
+# unprivileged runtime uid — the same trap that already bit entrypoint.sh.
+COPY skills/ /opt/dsh-skills/
+RUN chmod -R a+rX /opt/dsh-skills
 
 # ── locate the npm dsh CLI ──────────────────────────────────────────────────
 # The npm global prefix is NOT hardcoded, because it differs between base images

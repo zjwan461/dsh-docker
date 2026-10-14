@@ -93,6 +93,18 @@ services:
       #     The old volume can then be dropped: docker volume rm dsh_dsh-home
       - ./data/dsh:/data/dsh
       - ${DSH_WORKSPACES:-./workspaces}:/workspaces
+      # OPTIONAL: built-in skills without a rebuild.
+      #
+      # The image already bakes skills/ into /opt/dsh-skills and registers that
+      # path as the bundled skill root (DSH_BUNDLED_SKILL_DIR), so this line is
+      # only needed while you are AUTHORING a skill: it lets the host directory
+      # shadow the baked copy, and the skill watcher hot-reloads the change.
+      # :ro because built-ins are deployment assets, not agent scratch space —
+      # /opt/dsh-skills is deliberately outside the workspace, which is why the
+      # bundled root is the trusted one.
+      #
+      # Uncomment, `docker compose up -d`, and edit skills/<name>/SKILL.md:
+      # - ./skills:/opt/dsh-skills:ro
     stop_grace_period: 15s
     # GET / without a valid browser cookie answers 401, which is the healthy
     # state for a server that has never been logged into.

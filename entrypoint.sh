@@ -139,6 +139,35 @@ else
   log "settings document: $SETTINGS_FILE (host-shared, writable)"
 fi
 
+# Built-in skills. The mechanism is always on: DSH_BUNDLED_SKILL_DIR is
+# registered by dsh-skill-filesystem as the "bundled" root (trusted host, lowest
+# precedence, read outside the agent's sandbox). Shipping ZERO skills is a valid
+# state, so this reports instead of failing.
+if [[ -n "${DSH_BUNDLED_SKILL_DIR:-}" ]]; then
+  if [[ ! -d "$DSH_BUNDLED_SKILL_DIR" ]]; then
+    warn "built-in skill root $DSH_BUNDLED_SKILL_DIR does not exist, so the bundled skill set is empty. If compose bind-mounts over it, the host directory must exist before 'up'."
+  else
+    bundled=0
+    skipped=""
+    for entry in "$DSH_BUNDLED_SKILL_DIR"/*/; do
+      [[ -d "$entry" ]] || continue
+      if [[ -f "${entry}SKILL.md" ]]; then
+        bundled=$((bundled + 1))
+      else
+        skipped="$skipped $(basename "$entry")"
+      fi
+    done
+    if [[ "$bundled" -eq 0 ]]; then
+      log "built-in skills: none in $DSH_BUNDLED_SKILL_DIR (mechanism ready; see README: built-in skills)"
+    else
+      log "built-in skills: $bundled discovered in $DSH_BUNDLED_SKILL_DIR"
+    fi
+    if [[ -n "$skipped" ]]; then
+      warn "these subdirectories hold no SKILL.md and are ignored by discovery:$skipped"
+    fi
+  fi
+fi
+
 mkdir -p "$OVERLAY_DIR" || die "cannot create $OVERLAY_DIR"
 # mkdir -p succeeds when the directory already exists but is not writable (for
 # example a .runtime/ left behind by an earlier run as root), and the failing
@@ -159,7 +188,7 @@ else
   warn "Fix on the host, either way:"
   warn "  sudo chown -R $(id -u):$(id -g) <host directory mounted at $WORKSPACE>"
   warn "  -- or -- set DSH_UID=$owner_uid and DSH_GID=$owner_gid in .env, then: docker compose up -d"
-  warn "     Setting DSH_UID also re-owns nothing by itself: the dsh-home volume is created as 1000:1000, so re-own it too (see the message this entrypoint prints if it is not writable)."
+  warn "     Setting DSH_UID re-owns nothing by itself: the ./data/dsh host directory has its own owner, so chown it too: sudo chown -R $(id -u):$(id -g) <repo>/data/dsh"
 fi
 
 # A workspace that holds the deployment itself is a real misconfiguration, not
