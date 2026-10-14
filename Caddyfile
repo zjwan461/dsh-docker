@@ -39,6 +39,13 @@ https://{$DSH_SITE_ADDRESS} {
 	# Comment out `tls internal` above, uncomment the line below, and drop the
 	# two files into ./certs (mounted read-only at /certs):
 	# tls /certs/dsh.example.com.crt /certs/dsh.example.com.key
+	# Option C — THE ONE FOR A PUBLIC ADDRESS: let Caddy obtain a certificate from
+	# Let's Encrypt / ZeroSSL over ACME. Point DSH_SITE_ADDRESS at a real hostname
+	# that resolves to this machine, comment out `tls internal` above, and either
+	# remove this `tls` line or give it your contact address. Caddy validates via
+	# TLS-ALPN-01 on :443, so :80 does not need to be published for it to work.
+	# requirements: the name resolves publicly, and this host's :443 is reachable.
+	# tls admin@example.com
 
 	# ---------------------------------------------------------------------
 	# Headers
@@ -78,26 +85,28 @@ https://{$DSH_SITE_ADDRESS} {
 }
 
 # ---------------------------------------------------------------------------
-# Plaintext listener, derived from the SAME variable as the site above: nothing
-# is hardcoded, so changing DSH_SITE_ADDRESS moves both sites with it.
+# OPTIONAL, and dangerous: a plaintext listener on :80.
 #
-# It is HARMLESS while :80 stays unpublished — Caddy binds :80 inside the
-# container and nothing outside can reach it. Publishing :80 (compose.yaml) is the
-# switch that makes it reachable, and that switch sends the session cookie in the
-# clear on every request. The allowlist below is what keeps that survivable: an
-# address outside DSH_HTTP_ALLOWED_RANGES gets 403, and the default is loopback
-# only, so a published :80 answers nobody until you name your clients:
+# READ THE ADDRESS YOU ARE SERVING. An allowlist limits who may CONNECT; it does
+# nothing about who can SNIFF. When DSH_SITE_ADDRESS is a public address — or any
+# network you do not fully control — enabling this hands an agent that runs
+# commands inside this container to whoever is on the path, because the session
+# cookie is deliberately not marked Secure and therefore travels in the clear on
+# every request. On a public address use Option C above (a real domain, so there
+# is no warning and no cleartext) or an SSH tunnel to a loopback port (README
+# 「出路 B」), where the cookie never leaves the client machine.
 #
-#     DSH_HTTP_ALLOWED_RANGES=192.168.0.0/16
+# If this really is a network you control: uncomment the site below, publish :80
+# in compose.yaml, and set DSH_HTTP_ALLOWED_RANGES to the addresses that may use
+# it (everything else gets 403). The address comes from the same variable as the
+# site above, so nothing here is hardcoded.
 #
-# NOTE: if DSH_SITE_ADDRESS carries a port (a non-443 HTTPS site), this block would
-# claim that same port for plaintext. Leave it commented out in that setup.
-http://{$DSH_SITE_ADDRESS} {
-	@allowed remote_ip {$DSH_HTTP_ALLOWED_RANGES:127.0.0.1/32 ::1/128}
-	handle @allowed {
-		reverse_proxy {$DSH_UPSTREAM} {
-			flush_interval -1
-		}
-	}
-`trespond "plaintext listener: your address is not in DSH_HTTP_ALLOWED_RANGES. See compose.yaml." 403
-}
+# http://{$DSH_SITE_ADDRESS} {
+# 	@allowed remote_ip {$DSH_HTTP_ALLOWED_RANGES:127.0.0.1/32 ::1/128}
+# `thandle @allowed {
+# 		reverse_proxy {$DSH_UPSTREAM} {
+# `t`t`tflush_interval -1
+# `t`t}
+# `t}
+# `trespond "plaintext listener: your address is not in DSH_HTTP_ALLOWED_RANGES. See compose.yaml." 403
+# }

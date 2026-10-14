@@ -173,12 +173,17 @@ services:
     # warning in the Caddyfile.
     #
     # Running BOTH listeners at once (HTTPS on 443 as configured, plaintext on 80):
-    #   1. uncomment the :80 mapping just below;
-    #   2. set DSH_HTTP_ALLOWED_RANGES to the addresses that may use it;
-    #   3. list EVERY authority you browse in DSH_TRUSTED_HOSTS, comma-separated:
+    #   1. uncomment the site at the END of Caddyfile (it follows
+    #      DSH_SITE_ADDRESS, so it needs no address of its own);
+    #   2. uncomment the :80 mapping just below;
+    #   3. set DSH_HTTP_ALLOWED_RANGES to the addresses that may use it;
+    #   4. list EVERY authority you browse in DSH_TRUSTED_HOSTS, comma-separated:
     #        DSH_TRUSTED_HOSTS=dsh.internal,192.168.1.20
-    # The site itself already exists in Caddyfile and follows DSH_SITE_ADDRESS, so
-    # there is nothing to edit there.
+    #
+    # An allowlist limits who may CONNECT, not who may SNIFF, so this is only ever
+    # appropriate on a network you fully control. On a public address use Option C
+    # in the Caddyfile (a real domain with ACME) or an SSH tunnel instead: the
+    # cookie is not marked Secure, and it drives an agent that runs commands.
     # Caddy permits this because the global block sets `auto_https disable_redirects`:
     # it therefore never claims :80 for its own HTTP->HTTPS redirect listener, which
     # leaves that port free for a site of our own. Two consequences worth knowing:
