@@ -194,18 +194,30 @@ INSTALLATION=""
 if [[ -n "$dsh_bin" ]]; then
   INSTALLATION="$(dirname "$(dirname "$dsh_bin")")/node_modules/@deepseek-ai"
 fi
-projected="$(ls -1 "$PROJECTION" 2>/dev/null | wc -l)"
-installed=0
-if [[ -n "$INSTALLATION" ]]; then
-  installed="$(ls -1 "$INSTALLATION" 2>/dev/null | wc -l)"
+# `ls` exits 2 when the directory is absent, and `set -euo pipefail` turns that
+# into an instant, silent death here — which is exactly what this step must never
+# do, because "no projection yet" is the NORMAL state on a fresh home or right
+# after somebody drops it. Guard with -d instead of silencing the message.
+projected=0
+if [[ -d "$PROJECTION" ]]; then
+  projected="$(ls -1 "$PROJECTION" | wc -l)"
 fi
-if [[ "$projected" -gt 0 && "$installed" -gt 0 && "$projected" -lt "$installed" ]]; then
+installed=0
+if [[ -n "$INSTALLATION" && -d "$INSTALLATION" ]]; then
+  installed="$(ls -1 "$INSTALLATION" | wc -l)"
+fi
+if [[ "$projected" -eq 0 ]]; then
+  log "no profile projection yet: dsh builds it during this start"
+elif [[ "$installed" -gt 0 && "$projected" -lt "$installed" ]]; then
   warn "the profile projection has $projected packages while the installation supplies $installed."
   warn "A partial projection shadows the installation and breaks plugin loading with"
   warn "  plugin(s) failed to load: ... could not be resolved"
   warn "Permissions are not the problem — the CONTENT is, and nothing rebuilds it because"
   warn "the profile declares no dependencies. Drop it and let dsh project it again:"
   warn "  rm -rf ${DSH_HOME}/profiles/node_modules && docker compose restart dsh"
+  warn "BACK IT UP FIRST — this container has no npm registry access, so if dsh"
+  warn "  cannot rebuild the projection you must restore the directory to boot:"
+  warn "  cp -a ${DSH_HOME}/profiles/node_modules ${DSH_HOME}/profiles/node_modules.bak"
 elif [[ "$projected" -gt 0 ]]; then
   log "profile projection present ($projected packages)"
 fi
