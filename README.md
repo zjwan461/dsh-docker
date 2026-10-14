@@ -50,7 +50,7 @@ Caddy 已经同时承担了**域名虚拟主机、TLS 终结、反向代理**三
 | `.env.example` | 所有可调项 |
 | `verify.sh` | 在**物理机**上逐层验证 GUI 链路（DNS→TLS→Caddy→信任围栏→token→cookie→/api→WebSocket），失败项直接给出排查命令 |
 | `data/dsh/settings.yaml` | 服务端配置（提供方/端点/模型），mock 值可直接用。位于 `./data/dsh` 目录挂载内（容器路径 `/data/dsh/settings.yaml`）：**宿主编辑会热重载，Models 页保存也会落到这个文件** |
-| `patch-client-settings.mjs` | 构建期给浏览器 bundle 打补丁，让域名访问时设置页也能读写宿主文档（见「设置页为什么现在能用」）。锚点不匹配则**构建失败**，容器启动时再自检一次 |
+| `patch-client-settings.mjs` | 给浏览器 bundle 打补丁，让域名访问时设置页也能读写宿主文档（见「设置页为什么现在能用」）。**由 entrypoint 在 profile 组合完成之后应用**——客户端插件包属于 profile 而不是 dsh CLI，构建期还不存在。幂等，每次启动重放 |
 | `workspaces/` | 工作区 bind mount 源目录 |
 | `skills/` | 内置（bundled）技能目录；构建时 COPY 到镜像 `/opt/dsh-skills`。**目前故意为空**，机制已就绪 |
 | `LICENSE` | Apache License 2.0 全文（与官方文本逐字节一致） |
@@ -269,13 +269,15 @@ isLoopback: transport?.ownsHost === true || pageLocation === void 0
 
 ### 本镜像怎么处理的
 
-`patch-client-settings.mjs` 在**构建期**把上面那条定义改成 `true`。三条理由：
+`patch-client-settings.mjs` 把上面那条定义改成 `true`，**在容器启动、profile 组合完成之后**应用。三条理由：
 
 - **不需要编译源码。** 浏览器拿到的不是预构建产物：`dsh-client-modules` 是从磁盘读每个插件的 `lib/client.js`，再以 `plugins/<id>/client.js` 提供。改这个文件就是改浏览器实际执行的东西——不用编译 monorepo、不用 fork、不用每次发版 rebase。
 - **只改定义那一处，两处门禁同时生效。** 这是刻意的：`-general` 那处的周边代码在 `0.1.5-rc.1 → 0.2.0-rc.2` 之间**已经变过**（`ctx.settingsScope.describe()` → `ctx.configForms.describe()`），而定义那一行**逐字未变**。
-- **不依赖行号。** 锚点是整条表达式；匹配不到就**构建失败**，并打印该用哪条 `grep` 去找上游的新写法。补丁写盘后还会用 `node --check` 校验语法，不通过就回滚原文件。
+- **不依赖行号。** 锚点是整条表达式；匹配不到就打印「该用哪条 `grep` 去找上游的新写法」的诊断。写盘前还会用 `node --check` 校验语法，不通过就不落盘。定位也不靠猜路径：先用 Node 的解析器找 `@deepseek-ai/dsh-client-connection`，再退回**跟随符号链接**的遍历——pnpm 的 `node_modules` 全是符号链接，不跟随就什么都找不到。
 
-构建期断言是致命的，启动期只警告（`entrypoint.sh` 每次启动会再跑一次 `--check`）——因为「补丁没打上」的镜像看起来完全正常，直到有人打开 Models 页。
+补丁失败**只告警、不致命**：没有它整个 GUI 照常工作，只有 Models / General 设置页退化成 `settings are available in this browser`。
+
+> **为什么不在构建期做**（踩过的坑，值得记下）：最初的设计就是在 Dockerfile 里 `RUN` 这个脚本，并且**锚点不匹配就让构建失败**。结果构建直接报 `no client bundle found`——因为**客户端插件包不属于 npm CLI，而属于 profile**：`npm i -g @deepseek-ai/dsh` 装出来的树里没有它们，它们由 pnpm 在**首次组合 profile** 时装进 `$DSH_HOME/profiles/`。构建期根本没有可打补丁的文件，只能在启动、组合完成之后打。
 
 ### 这不是安全回退，但确实放宽了一件事
 
@@ -286,13 +288,13 @@ isLoopback: transport?.ownsHost === true || pageLocation === void 0
 ### 验证
 
 ```bash
-# 容器启动日志里应出现（`--check` 的结果）：
+# 启动日志里应出现：
 docker compose logs dsh | grep 'settings-UI patch'
-#   [dsh] settings-UI patch present: the domain-served GUI reads and writes the host document
+#   [dsh] settings-UI patch applied: the domain-served GUI edits the host document
 
-# 手工复核：应打印 `isLoopback: true ...`
+# 手工复核：应打印 `isLoopback: true ...`（路径在 $DSH_HOME/profiles 下，不在 /usr/local/lib/node_modules）
 docker compose exec dsh sh -lc \
-  'find /usr/local/lib/node_modules -path "*dsh-client-connection/lib/client.js" -exec grep -n "isLoopback:" {} +'
+  'grep -n "isLoopback:" /data/dsh/profiles/node_modules/@deepseek-ai/dsh-client-connection/lib/client.js'
 ```
 
 ### 如果补丁哪天失效了（上游改了写法）
@@ -514,7 +516,7 @@ docker compose exec dsh dsh plugin --profile web remove <package>
 
 1. **属主**：宿主目录属于别的 uid（实测 10001）时，最省事的是把 `.env` 的 `DSH_UID/DSH_GID` 设成该属主——构建参数会把它带进镜像，`./data/dsh` 这个宿主目录再 chown 一次即可。entrypoint 会打印实际属主与两种修法。
 2. 首次浏览器访问的证书信任：本项目已决定**接受自签警告、点一次继续**（前提是受管浏览器未禁用 `SSLErrorOverrideAllowed`）。
-3. **本轮改动需要一次构建验证**：Dockerfile / entrypoint 以 Linux 上已跑通的版本为基线，本轮新增的是「构建期补丁 + 断言」与 python_server 相关删除，因此要在服务器上 `docker compose build` 一次。构建期会跑补丁断言与 `--profile web --dump-config`，失败点都落在构建阶段，而不是首次打开页面时。
+3. **本轮改动需要一次构建验证**：Dockerfile / entrypoint 以 Linux 上已跑通的版本为基线，本轮新增的是「启动期补丁」与 python_server 相关删除，因此要在服务器上 `docker compose build` 一次。构建期会跑补丁断言与 `--profile web --dump-config`，失败点都落在构建阶段，而不是首次打开页面时。
 
 ## 内置技能（机制已就绪，暂不带技能）
 

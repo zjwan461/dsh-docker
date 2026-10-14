@@ -326,11 +326,13 @@ RUN set -eux; \
 # plugin's lib/client.js from disk as plugins/<id>/client.js, so no monorepo
 # build, no fork and no per-release rebase are needed.
 #
-# This step is deliberately FATAL on an anchor mismatch. A silently unpatched
-# image looks exactly like a working one until a user opens the Models page, so
-# the build is the only place where the failure is cheap. entrypoint.sh re-runs
-# the same script with --check at every start, but only warns.
-RUN node /usr/local/bin/dsh-patch-client-settings.mjs
+# It is NOT applied here. The client packages are not dependencies of the npm
+# CLI: they arrive with the `web` PROFILE, which dsh installs with pnpm into
+# $DSH_HOME/profiles/ on first composition. At build time $DSH_HOME is empty (or
+# a throwaway), so there is nothing to patch yet — an earlier revision of this
+# image ran the script here and failed the build with "no client bundle found".
+# entrypoint.sh applies it after it has composed the profile, which is also why
+# the script has to be idempotent and cheap to re-run on every start.
 
 # ── build-time self-check ───────────────────────────────────────────────────
 # The `--dump-config` check is the valuable one: it makes dsh compose the whole

@@ -22,18 +22,26 @@
  *
  *     Loading the provider directory failed: settings are available in this browser
  *
- * because it is reading a session-local document instead of $DSH_HOME/settings.yaml.
+ * because it reads a session-local document instead of $DSH_HOME/settings.yaml.
  * A second, independent gate sits in `dsh-client-ui-settings-general`, and both
  * read `$host.isLoopback` — so patching the DEFINITION fixes every consumer at
- * once. That matters: the consumer copy in `-general` changed its surrounding
- * code between 0.1.5-rc.1 and 0.2.0-rc.2, while the definition was byte-identical.
+ * once. That matters: the consumer in `-general` changed its surrounding code
+ * between 0.1.5-rc.1 and 0.2.0-rc.2, while the definition was byte-identical.
  *
- * ── Why this is a bundle patch and not a source build ───────────────────────
+ * ── Why a bundle patch and not a source build ───────────────────────────────
  *
  * The browser never receives a prebuilt asset: `dsh-client-modules` reads each
  * plugin's `lib/client.js` from disk and serves it as `plugins/<id>/client.js`.
  * Patching that file IS patching what the browser runs — no monorepo build, no
  * fork, no per-release rebase.
+ *
+ * ── Why this runs at CONTAINER START, not at image build ────────────────────
+ *
+ * The client packages are NOT dependencies of the npm CLI. They arrive with the
+ * `web` PROFILE, which dsh installs with pnpm into `$DSH_HOME/profiles/` on first
+ * composition. At image build time $DSH_HOME is empty or a throwaway, so there is
+ * nothing to patch yet — the entrypoint applies this AFTER it has composed the
+ * profile, which is also why it must be idempotent and cheap to re-run.
  *
  * ── Why patching this flag is not a security regression ─────────────────────
  *
@@ -48,20 +56,22 @@
  *   node patch-client-settings.mjs [--check] [--root <dir>]... [--quiet]
  *
  *   --check   verify only; never write. Exit 0 when patched, 1 when not.
- *   --root    directory to search (repeatable). Defaults to the Node global
- *             module roots, which is where the image installs dsh.
+ *   --root    an anchored search root (repeatable). Defaults to the profile
+ *             node_modules of $DSH_HOME plus the Node global module roots.
  *
- * Exit codes: 0 = patched (or already patched), 1 = anchor missing/ambiguous or
- * (with --check) not patched. The caller decides whether that is fatal: the
- * Dockerfile treats it as fatal, entrypoint.sh only warns.
+ * Exit codes: 0 = patched (or already patched), 1 = nothing found, or the anchor
+ * is missing/ambiguous. entrypoint.sh only warns; the container still boots.
  */
-import { readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync, writeFileSync, readdirSync, statSync, realpathSync, renameSync, unlinkSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 
 const MARKER = 'PATCHED by dsh-docker';
-/** The bundle that carries the definition. Only this file is ever touched. */
-const TARGET_SUFFIX = join('@deepseek-ai', 'dsh-client-connection', 'lib', 'client.js');
+const PACKAGE = '@deepseek-ai/dsh-client-connection';
+/** Path under the package root. */
+const RELATIVE = join('lib', 'client.js');
 
 /**
  * Anchored on the whole ternary rather than on a line number, because line
@@ -76,55 +86,101 @@ const quiet = argv.includes('--quiet');
 const roots = [];
 for (let i = 0; i < argv.length; i += 1) {
   if (argv[i] === '--root') {
-    const value = argv[i + 1];
-    if (!value) {
-      console.error('[patch-client-settings] --root needs a directory');
-      process.exit(1);
-    }
-    roots.push(value);
+    if (!argv[i + 1]) { console.error('[patch-client-settings] --root needs a directory'); process.exit(1); }
+    roots.push(argv[i + 1]);
     i += 1;
   }
 }
 if (roots.length === 0) {
+  const home = process.env.DSH_HOME;
+  if (home) {
+    // Where the web profile's plugins actually land.
+    roots.push(join(home, 'profiles', 'node_modules'), join(home, 'profiles'));
+  }
   roots.push('/usr/local/lib/node_modules', '/usr/lib/node_modules');
 }
 
-const log = (...args) => {
-  if (!quiet) console.log('[patch-client-settings]', ...args);
-};
+const log = (...args) => { if (!quiet) console.log('[patch-client-settings]', ...args); };
+const found = new Map(); // realpath -> path we will write
 
-/** Depth-limited recursive walk; the global tree is shallow but npm nests deeply. */
-function walk(dir, depth, out) {
-  if (depth < 0) return out;
+/**
+ * Route 1: let Node resolve the package. This follows pnpm's symlinks and
+ * honours package exports, which a directory walk cannot do reliably.
+ */
+function viaResolver(root) {
+  let req;
+  try {
+    req = createRequire(join(root, '_dsh_patch_resolve_.cjs'));
+  } catch {
+    return;
+  }
+  for (const spec of [`${PACKAGE}/package.json`, PACKAGE]) {
+    let resolved;
+    try {
+      resolved = req.resolve(spec);
+    } catch {
+      continue;
+    }
+    // package.json -> <pkg>/lib/client.js ; api entry (lib/index.js) -> sibling
+    const candidate = spec.endsWith('package.json')
+      ? join(dirname(resolved), RELATIVE)
+      : join(dirname(resolved), 'client.js');
+    try {
+      if (statSync(candidate).isFile()) found.set(realpathSync(candidate), candidate);
+    } catch { /* keep trying */ }
+  }
+}
+
+/**
+ * Route 2: a walk that FOLLOWS symlinks. pnpm wires node_modules with symlinks,
+ * so a Dirent-based walk (isDirectory()/isFile() are false for links) sees
+ * nothing at all — which is exactly the bug this route exists to avoid.
+ */
+function viaWalk(dir, depth, seen) {
+  if (depth < 0) return;
+  let real;
+  try {
+    real = realpathSync(dir);
+  } catch {
+    return;
+  }
+  if (seen.has(real)) return;
+  seen.add(real);
   let entries;
   try {
     entries = readdirSync(dir, { withFileTypes: true });
   } catch {
-    return out; // absent or unreadable root: not an error on its own
+    return;
   }
   for (const entry of entries) {
     const full = join(dir, entry.name);
-    if (entry.isDirectory()) walk(full, depth - 1, out);
-    else if (entry.isFile() && full.endsWith(TARGET_SUFFIX)) out.push(full);
+    let st;
+    try {
+      st = statSync(full); // follows symlinks
+    } catch {
+      continue;
+    }
+    if (st.isDirectory()) viaWalk(full, depth - 1, seen);
+    else if (st.isFile() && full.endsWith(join(PACKAGE, RELATIVE))) found.set(realpathSync(full), full);
   }
-  return out;
 }
 
-const candidates = [];
 for (const root of roots) {
   try {
     if (!statSync(root).isDirectory()) continue;
   } catch {
     continue;
   }
-  walk(root, 8, candidates);
+  viaResolver(root);
+  viaWalk(root, 8, new Set());
 }
 
-if (candidates.length === 0) {
-  console.error('[patch-client-settings] no client bundle found. Searched for');
-  console.error(`  .../${TARGET_SUFFIX}`);
-  for (const root of roots) console.error(`  under ${root}`);
-  console.error('Is the npm dsh CLI installed where the discovery step recorded it?');
+if (found.size === 0) {
+  console.error('[patch-client-settings] no client bundle found.');
+  console.error(`  looked for .../${join(PACKAGE, RELATIVE)}`);
+  for (const r of roots) console.error(`  under ${r}`);
+  console.error('The web profile is not installed yet: it arrives with the first profile');
+  console.error('composition (dsh web, or --dump-config). Re-run this after that.');
   process.exit(1);
 }
 
@@ -132,8 +188,14 @@ let patched = 0;
 let already = 0;
 const problems = [];
 
-for (const file of candidates) {
-  const source = readFileSync(file, 'utf8');
+for (const file of found.values()) {
+  let source;
+  try {
+    source = readFileSync(file, 'utf8');
+  } catch (error) {
+    problems.push(`${file}: cannot read (${error.code ?? error.message})`);
+    continue;
+  }
   if (source.includes(MARKER)) {
     already += 1;
     log(`already patched: ${file}`);
@@ -158,14 +220,23 @@ for (const file of candidates) {
     ': a domain-served GUI is treated as loopback-equivalent for the settings UI. ' +
     'The server still enforces the Host/Origin fence and the launch-token cookie. */$2';
   const next = source.replace(ANCHOR, replacement);
-  // A replacement that does not parse would break the browser bundle, and the
-  // browser is exactly where we would not see it until a user opens the page.
-  // Validate before committing, and leave the original in place on failure.
-  writeFileSync(file, next);
-  const parsed = syntaxCheck(file);
-  if (parsed !== true) {
-    writeFileSync(file, source);
-    problems.push(`${file}: the patched bundle does not parse (${parsed}); original restored`);
+
+  // Install by REPLACING the directory entry (temp file + rename), never by
+  // writing in place: pnpm hard-links package files out of its content-addressed
+  // store, so an in-place write would corrupt that shared copy. A rename leaves
+  // the store untouched and is atomic.
+  const staged = join(tmpdir(), `dsh-client-patch-${process.pid}-${patched}.js`);
+  try {
+    writeFileSync(staged, next);
+    const parsed = syntaxCheck(staged);
+    if (parsed !== true) {
+      problems.push(`${file}: the patched bundle does not parse (${parsed}); left untouched`);
+      continue;
+    }
+    renameSync(staged, file);
+  } catch (error) {
+    problems.push(`${file}: could not install the patch (${error.code ?? error.message})`);
+    try { unlinkSync(staged); } catch { /* nothing to clean */ }
     continue;
   }
   patched += 1;
@@ -173,20 +244,17 @@ for (const file of candidates) {
 }
 
 /**
- * Parse the file with this Node, in whichever module system its package
- * declares. Returns true when it parses, otherwise a short reason string.
+ * Parse with this Node, in whichever module system the package declares.
+ * Returns true when it parses, otherwise a short reason string.
  */
 function syntaxCheck(file) {
   let result;
   try {
     result = spawnSync(process.execPath, ['--check', file], { stdio: ['ignore', 'pipe', 'pipe'] });
-  } catch (error) {
-    // A sandbox that forbids spawning must not fail the build for that reason
-    // alone: the anchor match above is the real gate.
-    void error;
-    return true;
+  } catch {
+    return true; // a sandbox that forbids spawning must not fail the patch
   }
-  if (result.error) return true; // same reasoning as above
+  if (result.error) return true;
   if (result.status === 0) return true;
   const stderr = (result.stderr ?? '').toString().trim().split('\n').slice(0, 3).join(' | ');
   return stderr === '' ? `node --check exited ${result.status}` : stderr;
@@ -197,14 +265,11 @@ if (problems.length > 0) {
   for (const problem of problems) console.error(`  ${problem}`);
   console.error('');
   console.error('The upstream bundle changed. Find the new form with:');
-  console.error(`  grep -n 'isLoopback' ${candidates.join(' ')}`);
+  console.error(`  grep -n 'isLoopback' ${[...found.values()].join(' ')}`);
   console.error('then update ANCHOR in this script. Do not fall back to a line number.');
   process.exit(1);
 }
 
-if (checkOnly) {
-  log(`verified: ${already} bundle(s) carry the patch`);
-} else {
-  log(`done: ${patched} patched, ${already} already patched, ${candidates.length} candidate(s) inspected`);
-}
+if (checkOnly) log(`verified: ${already} bundle(s) carry the patch`);
+else log(`done: ${patched} patched, ${already} already patched, ${found.size} bundle(s) inspected`);
 process.exit(0);

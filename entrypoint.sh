@@ -221,25 +221,6 @@ if command -v bwrap >/dev/null 2>&1; then
   warn "bubblewrap is present in this image. The Linux chain probes bwrap before Landlock, and bwrap normally needs unprivileged user namespaces plus a relaxed seccomp profile inside a container. Remove bwrap unless you deliberately granted those."
 fi
 
-# Deployment patch: the browser bundle that decides where the settings document
-# lives. The Dockerfile applies it and FAILS the build when the anchor moves, so
-# this is a regression check for the cases the build cannot see (a cached layer,
-# or a `dsh plugin` operation that reinstalled the package).
-PATCH_TOOL=/usr/local/bin/dsh-patch-client-settings.mjs
-if [[ -r "$PATCH_TOOL" ]]; then
-  if node "$PATCH_TOOL" --check --quiet; then
-    log "settings-UI patch present: the domain-served GUI reads and writes the host document"
-  else
-    warn "the settings-UI patch is MISSING or no longer applies. The Models and"
-    warn "General settings pages will then report 'settings are available in this"
-    warn "browser' when the GUI is opened through the domain. Rebuild the image (the"
-    warn "Dockerfile applies and verifies it), then re-check with:"
-    warn "  node $PATCH_TOOL --check"
-  fi
-else
-  warn "$PATCH_TOOL is missing; the settings-UI patch cannot be verified."
-fi
-
 # ── 3. overlay ──────────────────────────────────────────────────────────────
 #
 # A patch replaces the targeted row's whole `config`, so every key the row owns
@@ -280,6 +261,35 @@ if [[ -z "${DSH_SKIP_CONFIG_CHECK:-}" ]]; then
     first_lines="$(printf '%s\n' "$dump" | head -n 3 | tr '\n' ' ')"
     warn "config dump failed; continuing to boot anyway: ${first_lines}"
   fi
+fi
+
+# ── 3b. deployment patch: settings UI on a remote origin ────────────────────
+#
+# This has to happen AFTER the composition above. The client packages are not
+# dependencies of the npm CLI: they arrive with the `web` profile, which dsh
+# installs with pnpm into $DSH_HOME/profiles/ — so at image build time there is
+# nothing to patch, and at container start the bundles exist only once the
+# profile has been composed. The script is idempotent, so re-running it on every
+# start is both the apply step and the re-apply step after a `dsh plugin`
+# operation replaces the package.
+#
+# A failure here is a warning, never fatal: without the patch the whole GUI still
+# works and only the Models/General settings pages degrade to
+# "settings are available in this browser".
+PATCH_TOOL=/usr/local/bin/dsh-patch-client-settings.mjs
+if [[ -r "$PATCH_TOOL" ]]; then
+  if patch_out="$(node "$PATCH_TOOL" 2>&1)"; then
+    log "settings-UI patch applied: the domain-served GUI edits the host document"
+  else
+    warn "the settings-UI patch could NOT be applied. The Models and General"
+    warn "settings pages will report 'settings are available in this browser' when"
+    warn "the GUI is opened through the domain. Details:"
+    while IFS= read -r patch_line; do warn "  ${patch_line}"; done <<<"$patch_out"
+    warn "If the profile was installed by this very start, one restart applies it:"
+    warn "  docker compose restart dsh"
+  fi
+else
+  warn "$PATCH_TOOL is missing; the settings-UI patch cannot be applied."
 fi
 
 # ── 4. exec ─────────────────────────────────────────────────────────────────
