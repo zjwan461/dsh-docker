@@ -210,6 +210,73 @@ elif [[ "$projected" -gt 0 ]]; then
   log "profile projection present ($projected packages)"
 fi
 
+# ── 1d. bundled plugins ─────────────────────────────────────────────────────
+#
+# Every directory under /opt/dsh-plugins is a dsh bundle (validated at build
+# time). Two things have to happen at START rather than at image build time,
+# because a profile only exists once dsh has composed it:
+#
+#   1. the package must resolve, so it is linked into the profile's
+#      node_modules. dsh's own link projection leaves that link alone:
+#      removeLinkProjections only unlinks symlinks whose target lies inside
+#      <profile>/.dsh-module-fallback, and "every other symlink stays";
+#   2. its patch layer must be composed, so it is appended to the HOME-level
+#      patch file ($DSH_HOME/cordis.patch.yml), which applies over every
+#      profile's layer — that is what makes the plugin present on the very first
+#      start, before any profile exists.
+#
+# The layer is seeded ONCE per plugin. Whatever you edit there afterwards — the
+# login gate's account and password, for instance — survives every later start,
+# and the seeding step notices the marker and leaves the file alone.
+PLUGIN_ROOT="${DSH_PLUGIN_ROOT:-/opt/dsh-plugins}"
+if [[ -d "$PLUGIN_ROOT" ]]; then
+  HOME_PATCH="${DSH_HOME}/cordis.patch.yml"
+  plugin_total=0
+  for plugin_dir in "$PLUGIN_ROOT"/*/; do
+    [[ -d "$plugin_dir" ]] || continue
+    plugin_dir="${plugin_dir%/}"
+    plugin_manifest="${plugin_dir}/package.json"
+    [[ -f "$plugin_manifest" ]] || continue
+    plugin_name="$(node -p "require('${plugin_manifest}').name ?? ''" 2>/dev/null || true)"
+    if [[ -z "$plugin_name" ]]; then
+      warn "bundled plugin ${plugin_dir} declares no name; skipped"
+      continue
+    fi
+
+    if [[ "$plugin_name" == @*/* ]]; then
+      mkdir -p "${DSH_HOME}/profiles/node_modules/${plugin_name%%/*}"
+      ln -sfn "$plugin_dir" "${DSH_HOME}/profiles/node_modules/${plugin_name}"
+    else
+      mkdir -p "${DSH_HOME}/profiles/node_modules"
+      ln -sfn "$plugin_dir" "${DSH_HOME}/profiles/node_modules/${plugin_name}"
+    fi
+
+    plugin_patch="$(node -p "require('${plugin_manifest}').dsh?.bundle?.patch ?? ''" 2>/dev/null || true)"
+    if [[ -n "$plugin_patch" && -f "${plugin_dir}/${plugin_patch}" ]]; then
+      if grep -qF "# bundled plugin: ${plugin_name}" "$HOME_PATCH" 2>/dev/null; then
+        log "bundled plugin ${plugin_name}: enabled"
+      else
+        {
+          printf '\n# --- bundled plugins (seeded once by entrypoint.sh; edit freely) ---\n'
+          printf '# bundled plugin: %s\n' "$plugin_name"
+          cat "${plugin_dir}/${plugin_patch}"
+        } >> "$HOME_PATCH"
+        log "bundled plugin ${plugin_name}: enabled, options in ${HOME_PATCH}"
+      fi
+      if grep -qiE '^[[:space:]]*(password|passwd|secret|token):' "${plugin_dir}/${plugin_patch}"; then
+        warn "bundled plugin ${plugin_name} ships a credential among its options."
+        warn "  The seeded copy in ${HOME_PATCH} is what runs — change it there, then"
+        warn "  restart dsh. Its defaults are public: anyone who can load the page can"
+        warn "  read the values the gate compares against."
+      fi
+    fi
+    plugin_total=$((plugin_total + 1))
+  done
+  if [[ "$plugin_total" -gt 0 ]]; then
+    log "bundled plugins: ${plugin_total} from ${PLUGIN_ROOT}"
+  fi
+fi
+
 mkdir -p "$OVERLAY_DIR" || die "cannot create $OVERLAY_DIR"
 # mkdir -p succeeds when the directory already exists but is not writable (for
 # example a .runtime/ left behind by an earlier run as root), and the failing

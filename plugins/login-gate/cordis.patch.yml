@@ -1,0 +1,17 @@
+# Login gate bundle: one Host row that publishes the gate options into the boot HTML.
+# Everything under `config` is what the sign-in form checks; edit it here (or on the
+# bundle's page in Settings → Plugins) and reload the page.
+- insert:
+    - id: dsh-login-gate
+      name: '@local/dsh-login-gate'
+      config:
+        # Account name typed on the gate.
+        username: admin
+        # Password typed on the gate.
+        password: dsh-admin
+        # Digits in the graphic captcha (3–6).
+        captchaLength: 4
+        # Heading shown above the form.
+        title: DeepSeek Harness
+        # Days a successful "remember me" lasts; 0 hides the option.
+        rememberDays: 7

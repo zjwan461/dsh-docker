@@ -276,9 +276,16 @@ COPY patch-client-settings.mjs /usr/local/bin/dsh-patch-client-settings.mjs
 # under a restrictive umask (or copied with scp -p) lands in the image as
 # root-owned mode 0600 and the unprivileged runtime uid then fails with
 # EACCES. Pin every mode explicitly instead of trusting the host.
+# `bash -n` here is a guard, not decoration: the entrypoint runs on every start, so
+# a syntax error in it turns a working image into a container that dies before its
+# first log line. `node --check` covers the patch script the same way — it parses as
+# ESM, which is how Node will load it.
 RUN chmod 0755 /usr/local/bin/dsh-entrypoint \
  && chmod 0755 /usr/local/bin/dsh-patch-client-settings.mjs \
- && chmod 0644 /usr/local/bin/dsh-doctor.mjs
+ && chmod 0644 /usr/local/bin/dsh-doctor.mjs \
+ && bash -n /usr/local/bin/dsh-entrypoint \
+ && node --check /usr/local/bin/dsh-patch-client-settings.mjs \
+ && echo 'entrypoint and patch script parse'
 
 # ── built-in skills (empty by default) ──────────────────────────────────────
 # One directory per skill, each containing SKILL.md:
@@ -433,6 +440,43 @@ RUN set -eux; \
 # file it resolves. entrypoint.sh re-runs this script with --check on every start
 # and only warns, which covers a plugin package reinstalled by `dsh plugin`.
 RUN node /usr/local/bin/dsh-patch-client-settings.mjs
+
+# ── bundled plugins ─────────────────────────────────────────────────────────
+# Everything under plugins/ ships into the image at /opt/dsh-plugins and is
+# ENABLED AT CONTAINER START, not here, because a profile only exists once dsh
+# has composed it. entrypoint.sh does two things per plugin:
+#
+#   1. links the package into $DSH_HOME/profiles/node_modules, so the plugin rows
+#      in the composed tree can resolve it. This survives dsh's own link
+#      projection: removeLinkProjections only unlinks symlinks whose target sits
+#      inside <profile>/.dsh-module-fallback, and "every other symlink stays";
+#   2. appends the bundle's own patch layer to $DSH_HOME/cordis.patch.yml, the
+#      home-level patch applied over every profile's layer, which is also why the
+#      first start already has the plugin. It is seeded ONCE, so the options you
+#      edit there are never overwritten by a later start.
+#
+# A plugin directory must be a dsh bundle: a package.json with a name that
+# resolves, an entry point that exists, and — when it declares
+# `dsh.bundle.patch` — that patch file. The checks below fail the build rather
+# than shipping an image whose GUI silently loses its plugins.
+COPY plugins/ /opt/dsh-plugins/
+RUN set -eux; \
+    chmod -R a+rX /opt/dsh-plugins; \
+    count=0; \
+    for dir in /opt/dsh-plugins/*/; do \
+      [ -d "$dir" ] || continue; \
+      manifest="${dir}package.json"; \
+      if [ ! -f "$manifest" ]; then echo "ERROR: ${dir} has no package.json"; exit 1; fi; \
+      name="$(node -p "require('${manifest}').name ?? ''")"; \
+      if [ -z "$name" ]; then echo "ERROR: ${manifest} declares no name"; exit 1; fi; \
+      entry="$(node -p "const p = require('${manifest}'); const e = p.exports ?? p.main ?? ''; typeof e === 'string' ? e : (e['.'] ?? '')")"; \
+      if [ -z "$entry" ] || [ ! -e "${dir}${entry}" ]; then echo "ERROR: ${name}: entry point ${entry:-<none>} does not exist"; exit 1; fi; \
+      patch="$(node -p "require('${manifest}').dsh?.bundle?.patch ?? ''")"; \
+      if [ -n "$patch" ] && [ ! -f "${dir}${patch}" ]; then echo "ERROR: ${name}: dsh.bundle.patch ${patch} does not exist"; exit 1; fi; \
+      echo "bundled plugin: ${name}  entry: ${entry}  patch: ${patch:-none}"; \
+      count=$((count + 1)); \
+    done; \
+    echo "bundled plugins: ${count} — add a directory under plugins/ to grow the set"
 
 # ── build-time self-check ───────────────────────────────────────────────────
 # The `--dump-config` check is the valuable one: it makes dsh compose the whole

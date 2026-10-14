@@ -52,6 +52,10 @@ services:
       # Empty value => no --trusted-host flag => browser accesses get 403.
       DSH_TRUSTED_HOSTS: ${DSH_TRUSTED_HOSTS:-}
       DSH_TELEMETRY_DISABLED: ${DSH_TELEMETRY_DISABLED:-1}
+      # Bundled plugins ship at /opt/dsh-plugins (every directory under plugins/ is
+      # copied there at build time) and are enabled at container start. Point this at
+      # a mounted host directory to add plugins without rebuilding the image.
+      DSH_PLUGIN_ROOT: ${DSH_PLUGIN_ROOT:-/opt/dsh-plugins}
       TZ: ${TZ:-UTC}
     # The settings UI works over the domain because this image ships a deployment
     # patch (patch-client-settings.mjs) that makes `$host.isLoopback` true in the

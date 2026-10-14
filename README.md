@@ -568,6 +568,26 @@ docker compose exec dsh dsh plugin --profile web remove <package>
 2. 首次浏览器访问的证书信任：本项目已决定**接受自签警告、点一次继续**（前提是受管浏览器未禁用 `SSLErrorOverrideAllowed`）。
 3. **本轮改动需要一次构建验证**：Dockerfile / entrypoint 以 Linux 上已跑通的版本为基线，本轮新增的是「启动期补丁」与 python_server 相关删除，因此要在服务器上 `docker compose build` 一次。构建期会跑补丁断言与 `--profile web --dump-config`，失败点都落在构建阶段，而不是首次打开页面时。
 
+## 内置插件（`plugins/` 目录）
+
+`plugins/` 下的**每个目录**都会在构建期被复制到镜像的 `/opt/dsh-plugins`，并在**容器启动时自动启用**：
+
+- 插件必须是 dsh 的 **bundle**：`package.json` 有可解析的 `name`、入口文件存在、声明了 `dsh.bundle.patch` 时该 patch 文件也存在。**构建期逐项校验，不符合即构建失败**（坏插件进不了镜像）。
+- **为什么启用发生在启动期而不是构建期**：profile 是 dsh **首次启动时才组合出来**的，构建期不存在。启动脚本因此做两件事：
+  1. 把包**软链**进 `$DSH_HOME/profiles/node_modules/`，让组合树里的插件行能解析到它。这个链接**不会被 dsh 的投影清理删掉**——`removeLinkProjections` 只删指向 `<profile>/.dsh-module-fallback` 的链接，其余符号链接保留；
+  2. 把该 bundle 自带的 patch 层**追加进 `$DSH_HOME/cordis.patch.yml`**（home 级 patch，覆盖所有 profile，所以**首次启动就生效**）。追加**只做一次**：之后你在那里改的选项（例如登录门禁的账号密码）不会被后续启动覆盖。
+- **改选项**：编辑 `data/dsh/cordis.patch.yml` 里对应插件的段落 → `docker compose restart dsh`。
+- **运行时加插件（不重建镜像）**：把宿主目录挂进容器，并把 `DSH_PLUGIN_ROOT` 指向它。
+
+### 附带插件：登录门禁 `@local/dsh-login-gate`
+
+在 Harness UI 前加一道「账号 + 密码 + 图形验证码」的门，选项位置见上一段（`data/dsh/cordis.patch.yml`）。
+
+⚠️ **两条边界必须知道**（都出自该插件自己的 README，请据此判断它适合什么用途）：
+
+1. **它不是认证**。校验在浏览器里做，账号与密码随页面一起下发 ⇒ 它挡的是「随手打开的 Harness 窗口」，**不保护** Harness 的 HTTP API、CLI 或磁盘上的 profile：绕过页面直接请求 API 依然可达。
+2. **默认凭据是公开的**（`admin` / `dsh-admin`）⇒ 启动脚本会在日志里告警提醒你改。尤其注意**明文 :80 那条路**：页面下发的内容与会话 cookie 都能被链路上的观察者读到 ⇒ 这门禁在明文通道上**不提供任何保护**。
+
 ## 内置技能（机制已就绪，暂不带技能）
 
 镜像里**已经装好了「内置技能」的机制**，但**故意一个技能都不带**。想加的时候，把技能放进仓库的 `skills/`，重新构建即可。
