@@ -2,11 +2,11 @@
 #
 # Deployment target: https://dsh.example.com
 #
-# The dsh service publishes no port at all; this is the single network entry
-# point. DSH's server carries no TLS of its own and its browser session cookie
-# is deliberately not marked `Secure` (it assumes loopback HTTP), so keep this
-# the ONLY way in and never add a plain-HTTP listener for the same host name:
-# an unencrypted request to the same authority would send that cookie.
+# The dsh service publishes no port at all; this is the network entry point. DSH
+# carries no TLS of its own and its session cookie is deliberately not marked
+# `Secure` (it assumes loopback HTTP), so plaintext to the same authority sends it
+# in the clear. The plaintext site at the end of this file is the single sanctioned
+# exception, and it is off in practice: it answers nobody until :80 is published
 
 {
 	# The example domain is one you cannot obtain a public certificate for, and
@@ -14,15 +14,15 @@
 	# either, so ACME is not attempted here at all: the internal issuer
 	# selected below is the only certificate source.
 	#
-	# disable_redirects drops Caddy's :80 HTTP->HTTPS redirect listener. Port 80
-	# is never published, and leaving that listener out removes any chance of a
-	# later port mapping exposing the session cookie over plaintext.
+	# disable_redirects drops Caddy's :80 HTTP->HTTPS redirect listener, leaving :80 free
+	# for the plaintext site at the end of this file. That site answers nobody until :80
+	# is published AND its allowlist names your clients.
 	auto_https disable_redirects
 }
 
 https://{$DSH_SITE_ADDRESS} {
-	# `dsh.example.com` is the GUI site — the only site this deployment
-	# serves.
+	# The GUI site. The plaintext listener at the end of this file is the only other site,
+	# and it stays off in practice unless you publish :80 and set its allowlist.
 
 	# ---------------------------------------------------------------------
 	# TLS — use exactly ONE of the two options
@@ -115,7 +115,7 @@ https://{$DSH_SITE_ADDRESS} {
 	}
 }
 # ---------------------------------------------------------------------------
-# OPTIONAL: a plaintext listener on :80, for reaching the GUI without TLS.
+# DEFINED BY DEFAULT, off in practice: a plaintext listener on :80 (no TLS).
 #
 # READ THE ADDRESS YOU ARE SERVING. On a public address this puts an agent that
 # runs commands inside this container behind a channel anyone on the path can read:
@@ -140,17 +140,30 @@ https://{$DSH_SITE_ADDRESS} {
 # HTTPS visit, so that plaintext entry disappears. Browsers ignore HSTS for IP-literal
 # hosts, so an IP-addressed deployment is exempt — this only bites the domain case.
 #
-# To enable: uncomment the site below, publish :80 in compose.yaml, and set
-# DSH_HTTP_ALLOWED_RANGES to the addresses that may use it (everything else gets
-# 403). The address comes from the same variable as the site above, so nothing here
-# is hardcoded.
-#
-# http://{$DSH_SITE_ADDRESS} {
-# 	@allowed remote_ip {$DSH_HTTP_ALLOWED_RANGES:127.0.0.1/32 ::1/128}
-# 	handle @allowed {
-# 		reverse_proxy {$DSH_UPSTREAM} {
-# 			flush_interval -1
-# 		}
-# 	}
-# 	respond "plaintext listener: your address is not in DSH_HTTP_ALLOWED_RANGES. See compose.yaml." 403
-# }
+# It is DEFINED below and off in practice: while :80 stays unpublished, Caddy
+# merely binds :80 inside the container and nothing outside reaches it. Two CONFIG
+# changes make it live: set DSH_HTTP_ALLOWED_RANGES (default loopback only, so all
+# others get 403), and uncomment the :80 mapping in compose.yaml. The first-visit
+# page is served here too, but ONLY to an address inside the allowlist.
+http://{$DSH_SITE_ADDRESS} {
+	@plainFirstVisit {
+		remote_ip {$DSH_HTTP_ALLOWED_RANGES:127.0.0.1/32 ::1/128}
+		method GET
+		path /
+		not header Cookie *dsh-auth-*
+		not query token=*
+	}
+	handle @plainFirstVisit {
+		root * /srv/unauth
+		rewrite * /index.html
+		file_server
+	}
+
+	@allowed remote_ip {$DSH_HTTP_ALLOWED_RANGES:127.0.0.1/32 ::1/128}
+	handle @allowed {
+		reverse_proxy {$DSH_UPSTREAM} {
+			flush_interval -1
+		}
+	}
+	respond "plaintext listener: your address is not in DSH_HTTP_ALLOWED_RANGES. See compose.yaml." 403
+}

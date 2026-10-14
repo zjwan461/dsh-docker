@@ -459,7 +459,7 @@ docker compose logs caddy | grep -i -E 'certificate|obtain|error'
 | 5 | `docker compose logs dsh \| grep 'landlock launcher'` | `full (/usr/.../landlock-run)` | `partial` = 内核 Landlock ABI 偏旧（文件效果仍受限，fail-closed）；`cannot locate` = `DSH_GLOBAL_ROOT` 指错目录 |
 | 6 | `docker compose exec dsh soffice --headless --version`；同理试 `ffmpeg -version`、`pdftotext -v`、`python3 -c "import pptx"`、`fc-list \| grep -ci CJK` | 各自输出版本；CJK 字体数为正 | 检查 `.env` 的 `INSTALL_OFFICE` / `INSTALL_PYTHON_DOCS` 是否为 1，然后重建镜像 |
 | 7 | `docker compose logs dsh \| grep 'built-in skills'` | `none in /opt/dsh-skills (mechanism ready; …)`；放了技能后变成计数 | 打出「机制就绪」即算通过：本镜像不带技能 |
-| 8 | 同时开 443 与明文端口时：`curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:<宿主端口>/` | `401` | `403` = `DSH_HTTP_ALLOWED_RANGES` 挡住了（**从服务器自己发起会被挡，属正常**，见下）；`000`/拒绝连接 = Caddyfile 里那个明文站点还没解开或 caddy 没重建 |
+| 8 | 同时开 443 与明文端口时：`curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:<宿主端口>/` | `401` | `403` = `DSH_HTTP_ALLOWED_RANGES` 挡住了（**从服务器自己发起会被挡，属正常**，见下）；`000`/拒绝连接 = compose 里那行 `:80` 映射还没解开，或 caddy 没重建（明文站点本身现在**默认已定义**，见 Caddyfile 末尾） |
 | 9 | 明文用 `http://<authority>:<宿主端口>/`，HTTPS 用 `https://<authority>/` | 两条路各自可用 | `https://…:<明文端口>` **必然失败**：TLS 打到了明文监听上 |
 
 **明文通道的两个配对关系（都踩过）**
