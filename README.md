@@ -474,6 +474,7 @@ docker compose exec dsh dsh plugin --profile web remove <package>
 |---|---|---|
 | `DSH_PERMISSION_MODE` | `workspace-write` | `read-only` / `workspace-write` / `danger-full-access`；最后一项**同时**把审批策略变成 `never` |
 | `DSH_TRUSTED_HOSTS` | `dsh.example.com` | 浏览器实际使用的 authority，逗号分隔；为空则浏览器访问会 403。默认端口（443/80）**必须写不带端口的裸域名**，写 `:443` 永远匹配不上 |
+| `DSH_HTTP_ALLOWED_RANGES` | `127.0.0.1/32 ::1/128` | 谁可以用**明文 :80** 监听（需先在 Caddyfile 解开那个站点、并在 compose 里发布 `:80`）。表外的来源一律 403；默认只有 loopback ⇒ 发布了 80 也"谁都进不来"，直到你填上客户端出口 IP（在**客户端**打开 https://ifconfig.me 查到）。验证必须从**客户端**做：从服务器自己发起会走 docker 网桥，得到 403 是正常的。 |
 | `DSH_WORKSPACES` | `./workspaces` | 宿主目录 → 容器 `/workspaces`，也是 `workspace-write` 的边界和 agent 默认工作目录 |
 | `DSH_UID` / `DSH_GID` | `1000` | 容器运行身份，必须能写 `DSH_WORKSPACES` 和宿主目录 `./data/dsh`（里面有会话、凭据与设置） |
 | `DSH_PUBLIC_PORT` | `443` | Caddy 发布到宿主机的 GUI 端口 |
