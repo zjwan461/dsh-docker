@@ -190,7 +190,15 @@ services:
     # the origins do NOT share cookies, so you log in once per origin, but they DO
     # share the host settings document, so a change through one shows in the other.
     # ports:
-    #   - "${DSH_PUBLIC_BIND:-0.0.0.0}:80:80"
+    # The container side MUST stay 80: the plaintext site in Caddyfile is written as
+    # http://{$DSH_SITE_ADDRESS} with no port, so Caddy listens on 80 inside. Only
+    # the HOST side is yours to choose — pick any free port and browse with it.
+    #   - "${DSH_PUBLIC_BIND:-0.0.0.0}:80:80"     # http://<site>/
+    #   - "${DSH_PUBLIC_BIND:-0.0.0.0}:81:80"     # http://<site>:81/
+    # Do NOT put that host port into DSH_SITE_ADDRESS: the variable also builds the
+    # HTTPS site, so a port there would move the TLS listener and desynchronise the
+    # plaintext one from this mapping. DSH_TRUSTED_HOSTS stays port-less too, which
+    # matches the browser's authority on every port.
     # ---------------------------------------------------------------------
     ports:
       - "${DSH_PUBLIC_BIND:-0.0.0.0}:${DSH_PUBLIC_PORT:-443}:${DSH_PUBLIC_PORT:-443}"
