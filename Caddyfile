@@ -58,6 +58,11 @@ https://{$DSH_SITE_ADDRESS} {
 		# and later breaks, HSTS removes that button. See the README troubleshooting
 		# table for the escape hatch.
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		# Caveat before relying on this: HSTS is recorded by every browser that
+		# loads the site successfully, so a plan to ALSO serve plaintext for the
+		# same host is defeated by it — after that first visit the browser upgrades
+		# http:// to https:// for a year. Browsers ignore HSTS for IP-literal hosts
+		# (an IP-addressed deployment is therefore exempt); a domain is not.
 		-Server
 	}
 
@@ -83,30 +88,43 @@ https://{$DSH_SITE_ADDRESS} {
 		flush_interval -1
 	}
 }
-
 # ---------------------------------------------------------------------------
-# OPTIONAL, and dangerous: a plaintext listener on :80.
+# OPTIONAL: a plaintext listener on :80, for reaching the GUI without TLS.
 #
-# READ THE ADDRESS YOU ARE SERVING. An allowlist limits who may CONNECT; it does
-# nothing about who can SNIFF. When DSH_SITE_ADDRESS is a public address — or any
-# network you do not fully control — enabling this hands an agent that runs
-# commands inside this container to whoever is on the path, because the session
-# cookie is deliberately not marked Secure and therefore travels in the clear on
-# every request. On a public address use Option C above (a real domain, so there
-# is no warning and no cleartext) or an SSH tunnel to a loopback port (README
-# 「出路 B」), where the cookie never leaves the client machine.
+# READ THE ADDRESS YOU ARE SERVING. On a public address this puts an agent that
+# runs commands inside this container behind a channel anyone on the path can read:
+# the session cookie is deliberately not marked Secure, so it travels in the clear
+# on every request.
 #
-# If this really is a network you control: uncomment the site below, publish :80
-# in compose.yaml, and set DSH_HTTP_ALLOWED_RANGES to the addresses that may use
-# it (everything else gets 403). The address comes from the same variable as the
-# site above, so nothing here is hardcoded.
+# What can and cannot be done about that, stated honestly:
+#   * an allowlist narrows WHO may connect, so an observer has to sit on the route
+#     to your own address — but it does not stop sniffing on that route;
+#   * basic_auth is NO help on a cleartext channel: the observer reads those
+#     credentials in the same breath as the cookie. It only helps against a cookie
+#     that leaked somewhere else, such as a log or a Referer;
+#   * so the protection available here is a tight allowlist and sessions that are
+#     short-lived, and nothing more.
+#
+# Preferred on a public address: Option C above (a real domain, so there is neither
+# a warning nor cleartext) or an SSH tunnel to a loopback port (README 「出路 B」),
+# where the cookie never leaves the client machine.
+#
+# HSTS TRAP if you later move to a DOMAIN and still want plaintext: the header above
+# makes browsers upgrade http:// to https:// for a year after their first successful
+# HTTPS visit, so that plaintext entry disappears. Browsers ignore HSTS for IP-literal
+# hosts, so an IP-addressed deployment is exempt — this only bites the domain case.
+#
+# To enable: uncomment the site below, publish :80 in compose.yaml, and set
+# DSH_HTTP_ALLOWED_RANGES to the addresses that may use it (everything else gets
+# 403). The address comes from the same variable as the site above, so nothing here
+# is hardcoded.
 #
 # http://{$DSH_SITE_ADDRESS} {
 # 	@allowed remote_ip {$DSH_HTTP_ALLOWED_RANGES:127.0.0.1/32 ::1/128}
-# `thandle @allowed {
+# 	handle @allowed {
 # 		reverse_proxy {$DSH_UPSTREAM} {
-# `t`t`tflush_interval -1
-# `t`t}
-# `t}
-# `trespond "plaintext listener: your address is not in DSH_HTTP_ALLOWED_RANGES. See compose.yaml." 403
+# 			flush_interval -1
+# 		}
+# 	}
+# 	respond "plaintext listener: your address is not in DSH_HTTP_ALLOWED_RANGES. See compose.yaml." 403
 # }
