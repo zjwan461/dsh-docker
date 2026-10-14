@@ -12,7 +12,7 @@
 - 宿主机只需一个端口要放通、要保证空闲;
 - Caddy 的内部 CA 对**所有**主机名只有**一个根证书**,浏览器只做**一次**信任决定。
 
-`dsh` 是唯一的服务：**Web GUI**，entrypoint 是 `dsh-entrypoint`，最终 exec `dsh web`。镜像基于 `node:22-bookworm-slim`（glibc；**不要换 Alpine**，musl 下 `node-pty` 会退化成源码编译）。
+`dsh` 是唯一的服务：**Web GUI**，entrypoint 是 `dsh-entrypoint`，最终 exec `dsh web`。镜像基于 `python:3.11-slim-bookworm` + NodeSource 的 Node 22（glibc；**不要换 Alpine**，musl 下 `node-pty` 会退化成源码编译）。
 
 ### 为什么不加 nginx（架构决定，勿重复讨论）
 
@@ -25,7 +25,7 @@ Caddy 已经同时承担了**域名虚拟主机、TLS 终结、反向代理**三
 
 | 事实 | 由此产生的设计 |
 |---|---|
-| CLI 依赖 `commander@15`，engines 为 `>=22.12.0` | 基础镜像必须 Node ≥ 22.12，故用 `node:22-bookworm-slim` |
+| CLI 依赖 `commander@15`，engines 为 `>=22.12.0` | Node 必须 ≥ 22.12，故用 NodeSource 在 Debian glibc 基线上装 Node 22 |
 | `node-pty` 自带 `prebuilds/linux-x64`，`sharp`/`ripgrep`/`landlock-run` 都是预编译 npm 包 | 镜像里不需要 gcc/python-dev；**不要用 Alpine**（musl 下 `node-pty` 会退化成源码编译） |
 | Linux 沙箱链是 `bwrap → Landlock`，按顺序探测，两者都不可用则 fail closed（`SANDBOX_UNAVAILABLE`） | 镜像**故意不装 bubblewrap**，让容器稳定落到无需任何特权的 Landlock |
 | `dsh web --host 0.0.0.0` 被 CLI 明确拒绝（usage error 退出） | 用 `--patch` 覆盖层把 `webserver` 行的 `host` 改成 `0.0.0.0`（只有容器内网可见） |
@@ -42,7 +42,7 @@ Caddy 已经同时承担了**域名虚拟主机、TLS 终结、反向代理**三
 
 | 文件 | 作用 |
 |---|---|
-| `Dockerfile` | `node:22-bookworm-slim` + 全局 `@deepseek-ai/dsh` + `pnpm`；构建期用 `--dump-config` 自检整个 `web` profile 能否解析 |
+| `Dockerfile` | `python:3.11-slim-bookworm`（glibc 基线；选它是因为这是目标主机上已验证过的配置，Python 解释器本身已无其它用途）+ NodeSource Node 22 + 全局 `@deepseek-ai/dsh` + `pnpm` + 常用工具层（见「镜像里预装了什么」）；构建期用 `--dump-config` 自检整个 `web` profile |
 | `entrypoint.sh` | 预检目录可写性 → 打印沙箱体检结论 → 生成 `--patch` 覆盖层并自检 → exec dsh |
 | `doctor.mjs` | 启动时探测并打印 Landlock runner 的实际可用性 |
 | `compose.yaml` | `dsh`（不发布端口）+ `caddy`（TLS 入口，唯一对外端口）|
@@ -54,6 +54,62 @@ Caddy 已经同时承担了**域名虚拟主机、TLS 终结、反向代理**三
 | `workspaces/` | 工作区 bind mount 源目录 |
 | `skills/` | 内置（bundled）技能目录；构建时 COPY 到镜像 `/opt/dsh-skills`。**目前故意为空**，机制已就绪 |
 | `LICENSE` | Apache License 2.0 全文（与官方文本逐字节一致） |
+
+## 镜像里预装了什么
+
+这是一个**给 agent 用的工作环境**：容器里少一个命令，任务就多一次联网安装，或者直接卡死。所以常用工具预装在镜像里，按「解锁了什么」分组。
+
+### 基础工具（始终安装）
+
+| 类别 | 包 |
+|---|---|
+| 传输 | `curl` `wget` `rsync` |
+| 版本控制 | `git` `openssh-client` |
+| 压缩包 | `unzip` `zip` `p7zip-full` `bzip2` `zstd` `xz-utils` |
+| 查看/检查 | `file` `jq` `tree` `sqlite3` |
+| 编辑 | `vim-tiny` `nano` —— **没有编辑器的话，改容器内的 `/data/dsh/settings.yaml` 就只能靠 `docker cp`** |
+| 运行/信号 | `less` `procps` `tini` |
+| 文本搜索 | `ripgrep`（dsh 自带 `@vscode/ripgrep`，但 agent 自己的 shell 需要一个 `rg` 在 PATH 上） |
+| 网络排障 | `iproute2`（`ss`/`ip`）`bind9-dnsutils`（`dig`）`iputils-ping` `netcat-openbsd` |
+| 时区 | `tzdata` —— 否则 compose 里的 `TZ` 会被一部分工具静默忽略 |
+
+### 文档 / PDF / 媒体（始终安装）
+
+| 包 | 用途 |
+|---|---|
+| `poppler-utils` | `pdftotext` / `pdftoppm` / `pdfinfo` —— PDF 转文本、PDF 转图片，agent 最常用的两个 PDF 操作 |
+| `qpdf` | 合并、线性化、解密 |
+| `ghostscript` | PDF 后处理；也是 LibreOffice / pandoc 若干导出路径的硬依赖 |
+| `imagemagick` | `convert` / `identify` / `montage`（与 GUI 自带的 sharp 功能重叠，但 shell 里需要的是**命令**，不是库） |
+| `ffmpeg` | 转码、抽帧、生成缩略图、音视频封装 |
+| `sox` | 轻量音频处理（裁剪、重采样、拼接） |
+| `libimage-exiftool-perl` | 读写 EXIF：给生成图打标、检查相机或模型写了什么 |
+| `fonts-dejavu-core` `fonts-noto-cjk` `fonts-noto-color-emoji` | **`fonts-noto-cjk` 是关键**：没有 CJK 字体，中文在 LibreOffice / pandoc / 预览渲染里全是**豆腐块** |
+
+### 可选层（`.env` 开关，默认开）
+
+| 开关 | 装上什么 | 量级 |
+|---|---|---|
+| `INSTALL_OFFICE=1` | `libreoffice-core/writer/calc/impress` + `pandoc` | **约 500MB 以上** |
+| `INSTALL_PYTHON_DOCS=1` | `python-pptx` `python-docx` `openpyxl` `Pillow` | 约 50MB |
+
+设成 `0` 可以瘦身，但**必须重新构建**（`docker compose build && docker compose up -d`）。
+
+LibreOffice 有两点值得说明：
+
+- **装的是组件包，不是 `libreoffice` 元包**，且全程 `--no-install-recommends`。元包的 recommends 会把 gtk3、Java、邮件合并等桌面依赖拖进来，而 headless 转换不需要它们：
+
+  ```bash
+  soffice --headless --convert-to pdf --outdir /tmp deck.pptx
+  ```
+
+- **`pandoc` 生成 PDF 需要一个 PDF 引擎**，而 LaTeX 是几百 MB、**故意不装**。要 PDF 就用 LibreOffice 的 `--convert-to pdf`，或者 ghostscript。
+
+### 故意不装的
+
+`texlive-*`（几百 MB 起）、`chromium`/`xvfb`（HTML 截图或页面渲染才需要，体积很大）、`build-essential`（dsh 的原生依赖都走预编译 npm 包与 `node-addon-system`，不需要编译器）。
+
+> 本机（Windows）没有 Docker，**无法测量确切体积**；上表给的是量级。构建后用 `docker image ls dsh` 看实际大小。
 
 ## 前置条件
 

@@ -64,21 +64,141 @@ ENV NPM_CONFIG_FUND=false \
 # every start. See compose.yaml for the no-rebuild alternative and README 「内置技能」.
 ENV DSH_BUNDLED_SKILL_DIR=/opt/dsh-skills
 
-# apt: curl for the healthchecks and verify.sh, git because the agent is a
-# coding agent, openssh-client for cloning over SSH, less for `git log`, procps
-# for the agent's own process inspection, tini so PID 1 forwards SIGTERM, and
-# xz-utils for archives the agent unpacks.
+# ── base tooling ────────────────────────────────────────────────────────────
+# The container is a WORKING environment for an agent, so every missing binary
+# is either a dead end or a network install at run time. Grouped by what they
+# unblock:
+#
+#   transfer    curl wget rsync
+#   vcs/build   git (the agent is a coding agent), openssh-client for ssh remotes
+#   archives    unzip zip p7zip-full bzip2 zstd — xz-utils is here for the same
+#               reason (the agent unpacks downloads)
+#   inspection  file (what IS this?), jq (what does this JSON say?), tree,
+#               sqlite3 for the many small databases agent tooling produces
+#   editing     vim-tiny nano — there is otherwise NO editor in the image, which
+#               makes a container-side fix to /data/dsh/settings.yaml impossible
+#               without docker cp
+#   runtime     less procps tini (PID 1 forwards SIGTERM)
+#   networking  iproute2 bind9-dnsutils iputils-ping netcat-openbsd — the
+#               compose/proxy troubleshooting in the README keeps asking for
+#               dig/ss/ping from inside the container
+#   time        tzdata — without it TZ from compose is silently ignored by tools
+#               that read the zone database
+#   text search ripgrep — @vscode/ripgrep ships inside dsh, but the agent's own
+#               shell wants a plain `rg` on PATH
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       ca-certificates \
       curl \
+      wget \
+      rsync \
       git \
-      less \
       openssh-client \
-      procps \
-      tini \
+      unzip \
+      zip \
+      p7zip-full \
+      bzip2 \
+      zstd \
       xz-utils \
+      file \
+      jq \
+      tree \
+      sqlite3 \
+      vim-tiny \
+      nano \
+      less \
+      procps \
+      ripgrep \
+      tini \
+      iproute2 \
+      bind9-dnsutils \
+      iputils-ping \
+      netcat-openbsd \
+      tzdata \
  && rm -rf /var/lib/apt/lists/*
+
+# ── documents, PDF, media ───────────────────────────────────────────────────
+#   poppler-utils          pdftotext / pdftoppm / pdfinfo — PDF to text and PDF
+#                          to image, the two PDF operations an agent needs most
+#   qpdf                   merge, linearise, decrypt
+#   ghostscript            PDF post-processing; also a hard dependency of several
+#                          LibreOffice and pandoc export paths
+#   imagemagick            convert / identify / montage. Overlaps with the sharp
+#                          npm package the GUI already carries, but the agent's
+#                          shell needs a COMMAND, not a library binding
+#   ffmpeg                 transcode, extract frames, build thumbnails, mux audio
+#   sox                    light audio work (trim, resample, concat)
+#   libimage-exiftool-perl read and write EXIF — tag generated images, inspect
+#                          what a camera or a model wrote
+#   fonts-noto-cjk         THE important one: without a CJK font every Chinese
+#                          character in a LibreOffice/pandoc/preview render comes
+#                          out as a tofu box. fonts-noto-color-emoji is the same
+#                          argument for emoji.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      poppler-utils \
+      qpdf \
+      ghostscript \
+      imagemagick \
+      ffmpeg \
+      sox \
+      libimage-exiftool-perl \
+      fonts-dejavu-core \
+      fonts-noto-cjk \
+      fonts-noto-color-emoji \
+ && rm -rf /var/lib/apt/lists/*
+
+# ── office documents (the heavy layer, switchable) ──────────────────────────
+# Build with --build-arg INSTALL_OFFICE=0 (or INSTALL_OFFICE=0 in .env) to leave
+# roughly half a gigabyte out of the image.
+#
+# COMPONENT packages, not the `libreoffice` metapackage. Together with
+# --no-install-recommends that is what keeps a desktop out of the image: the
+# metapackage drags in gtk3, java and the mail/merge extras. Headless conversion
+# works without any of it:
+#   soffice --headless --convert-to pdf --outdir /tmp deck.pptx
+#
+# pandoc lives here rather than in the layer above because it is a ~120 MB
+# static Haskell binary; it converts markdown to and from docx/pptx/html.
+# Producing PDF through pandoc additionally needs a PDF engine — LaTeX is
+# hundreds of megabytes and is deliberately NOT installed; use LibreOffice
+# (--convert-to pdf) or ghostscript instead.
+ARG INSTALL_OFFICE=1
+RUN set -eux; \
+    if [ "${INSTALL_OFFICE}" = "1" ]; then \
+      apt-get update; \
+      apt-get install -y --no-install-recommends \
+        libreoffice-core \
+        libreoffice-writer \
+        libreoffice-calc \
+        libreoffice-impress \
+        pandoc; \
+      rm -rf /var/lib/apt/lists/*; \
+      soffice --headless --version; \
+    else \
+      echo 'INSTALL_OFFICE=0: LibreOffice and pandoc are NOT in this image'; \
+    fi
+
+# ── python libraries for document generation (switchable) ───────────────────
+# The python interpreter arrives with the base image; these are the libraries the
+# document skills need. In particular python-pptx + Pillow are what the bundled
+# pptx workflow drives, and without them the agent has to pip install at run time
+# (which needs egress and is slow).
+#
+# pandas / matplotlib / markitdown are one line away in the same list when a task
+# calls for them; they are not here by default because they roughly double this
+# layer for nothing.
+ARG INSTALL_PYTHON_DOCS=1
+RUN set -eux; \
+    if [ "${INSTALL_PYTHON_DOCS}" = "1" ]; then \
+      pip install --no-cache-dir \
+        python-pptx \
+        python-docx \
+        openpyxl \
+        Pillow; \
+    else \
+      echo 'INSTALL_PYTHON_DOCS=0: document-generation libraries are NOT in this image'; \
+    fi
 
 # ── Node.js 22 ──────────────────────────────────────────────────────────────
 # The NodeSource setup script imports its signing key itself (dearmor), so no
