@@ -125,6 +125,72 @@ services:
       start_period: 90s
     networks: [dsh]
 
+  # OPTIONAL: a small FastAPI admin panel that reads the dsh container's startup
+  # log and shows the current login token, plus a ready-to-click login URL.
+  #
+  # It sits behind the `admin` profile, so `docker compose up -d` behaves exactly
+  # as before. Enable it explicitly:
+  #
+  #     docker compose --profile admin up -d --build admin
+  #     docker compose --profile admin logs -f admin
+  #
+  # Two things come with it, and neither is optional:
+  #
+  #  1. It mounts /var/run/docker.sock. Reading another container's log has no
+  #     narrower route, but that mount is root-equivalent access to the host —
+  #     the panel can do anything the daemon can. Treat this container as trusted
+  #     infrastructure and never publish it beyond loopback.
+  #  2. ADMIN_PASSWORD is mandatory. Compose refuses to start without it (`:?`
+  #     below), and app/main.py independently refuses to boot when bound to
+  #     anything but 127.0.0.1 without one — because the panel prints a token
+  #     that drives an agent inside the dsh container.
+  #
+  # Published on loopback only; reach it over an SSH tunnel:
+  #     ssh -L 8642:127.0.0.1:8642 <user>@<server>   ->   http://127.0.0.1:8642/
+  #
+  # It needs no TLS of its own over that tunnel, and Caddy is NOT in this path:
+  # the dsh entry point stays the single public port. To put it behind Caddy
+  # instead, add a site block there and read admin/README.md 「安全」 first.
+  admin:
+    build:
+      context: ./admin
+      args:
+        # Group of /var/run/docker.sock on the host:
+        #     stat -c '%g' /var/run/docker.sock
+        ADMIN_DOCKER_GID: ${ADMIN_DOCKER_GID:-999}
+    image: dsh-admin:${ADMIN_VERSION:-0.1.0}
+    profiles: ["admin"]
+    restart: unless-stopped
+    # required: false so that stopping dsh does not block the panel — it is most
+    # useful exactly when dsh is down or restarting, because a fresh start is
+    # when the new token appears in the log.
+    depends_on:
+      dsh:
+        condition: service_started
+        required: false
+    environment:
+      ADMIN_BIND_HOST: "0.0.0.0"
+      ADMIN_BIND_PORT: "8642"
+      ADMIN_USER: ${ADMIN_USER:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD in .env — the admin panel shows a live login token}
+      # Empty => resolve the dsh container by compose labels (project/service).
+      ADMIN_CONTAINER: ${ADMIN_CONTAINER:-}
+      ADMIN_COMPOSE_PROJECT: dsh
+      ADMIN_COMPOSE_SERVICE: dsh
+      # Only used to build the browser-facing link: https://<authority>/?token=…
+      ADMIN_SITE_ADDRESS: ${DSH_SITE_ADDRESS:-}
+      ADMIN_PUBLIC_PORT: ${DSH_PUBLIC_PORT:-443}
+      ADMIN_REFRESH_SECONDS: ${ADMIN_REFRESH_SECONDS:-5}
+      TZ: ${TZ:-UTC}
+    ports:
+      # Loopback on the HOST side, deliberately. Do not widen this without TLS
+      # and a second factor in front (admin/README.md 「安全」).
+      - "127.0.0.1:${ADMIN_PORT:-8642}:8642"
+    volumes:
+      # The one route to another container's log. See the warning above.
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks: [dsh]
+
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped

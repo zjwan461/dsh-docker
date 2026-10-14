@@ -15,3 +15,10 @@ data/*
 !data/dsh/
 data/dsh/*
 !data/dsh/settings.yaml
+
+# The admin panel (admin/): Python byte-code, its local virtualenv and pytest's
+# cache are machine-local. admin/.env is already covered by `.env` above.
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/

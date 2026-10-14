@@ -45,14 +45,15 @@ Caddy 已经同时承担了**域名虚拟主机、TLS 终结、反向代理**三
 | `Dockerfile` | `python:3.11-slim-bookworm`（glibc 基线；选它是因为这是目标主机上已验证过的配置，Python 解释器本身已无其它用途）+ NodeSource Node 22 + 全局 `@deepseek-ai/dsh` + `pnpm` + 常用工具层（见「镜像里预装了什么」）；构建期用 `--dump-config` 自检整个 `web` profile |
 | `entrypoint.sh` | 预检目录可写性 → 打印沙箱体检结论 → 生成 `--patch` 覆盖层并自检 → exec dsh |
 | `doctor.mjs` | 启动时探测并打印 Landlock runner 的实际可用性 |
-| `compose.yaml` | `dsh`（不发布端口）+ `caddy`（TLS 入口，唯一对外端口）|
+| `compose.yaml` | `dsh`（不发布端口）+ `caddy`（TLS 入口，唯一对外端口）；另有可选的 `admin` 管理端，挂在 `admin` profile 下，**默认不启动** |
 | `Caddyfile` | TLS 终结、HSTS、SSE/WebSocket 免缓冲透传、可选 basic_auth |
-| `.env.example` | 所有可调项 |
+| `.env.example` | 所有可调项（含可选的管理端 `ADMIN_*`）|
 | `verify.sh` | 在**物理机**上逐层验证 GUI 链路（DNS→TLS→Caddy→信任围栏→token→cookie→/api→WebSocket），失败项直接给出排查命令 |
 | `data/dsh/settings.yaml` | 服务端配置（提供方/端点/模型），mock 值可直接用。位于 `./data/dsh` 目录挂载内（容器路径 `/data/dsh/settings.yaml`）：**宿主编辑会热重载，Models 页保存也会落到这个文件** |
 | `patch-client-settings.mjs` | 给浏览器 bundle 打补丁，让域名访问时设置页也能读写宿主文档（见「设置页为什么现在能用」）。**构建期以 root 应用**——它改的文件在 root 所有的 npm 全局安装树里，而 profile 的 `node_modules` 只是指向那棵树的符号链接，运行时 uid 无论怎么写都只能 EACCES。entrypoint 每次启动用 `--check` 复核 |
 | `workspaces/` | 工作区 bind mount 源目录 |
 | `skills/` | 内置（bundled）技能目录；构建时 COPY 到镜像 `/opt/dsh-skills`。**目前故意为空**，机制已就绪 |
+| `admin/` | **可选的管理端**：一个小 FastAPI 服务（自己也是容器），用 Docker SDK 经 socket 读 `dsh` 容器的启动日志，把当前 token 和可点的登录链接显示出来。见「管理端：在浏览器里看 token」 |
 | `LICENSE` | Apache License 2.0 全文（与官方文本逐字节一致） |
 
 ## 镜像里预装了什么
@@ -266,6 +267,53 @@ https://dsh.example.com/?token=xxxxx
 1. **重启不是吊销手段**——它换了 token，但已登录的浏览器照旧能用。要吊销所有人：
    `docker compose exec dsh rm /data/dsh/.credentials.yaml && docker compose restart dsh`
 2. token **自身没有过期时间**，只要进程没重启，日志里那个链接就一直可用（这也是 30 天后还能靠它重新登录的原因）。它**等同于密码**，而且明文出现在 `docker logs` 里——不要贴进工单或聊天工具。
+
+## 管理端：在浏览器里看 token（可选）
+
+上面的取 token 过程可以交给一个**可选的小管理端**（`admin/`）：它自己也是一个容器，
+用 **Docker SDK 经 `/var/run/docker.sock`** 读 `dsh` 容器的启动日志，把当前 token、
+可点击的登录链接、容器状态和本次运行的启动日志显示在一张页面上。
+
+它挂在 compose 的 **`admin` profile** 下，所以 `docker compose up -d` 的行为完全不变；
+不用它的人什么都不用做。
+
+```bash
+cd dsh-docker
+
+# 1) 在 .env 里补两项（ADMIN_PASSWORD 缺失时 compose 直接拒绝启动）
+echo "ADMIN_PASSWORD=$(openssl rand -base64 18)" >> .env
+echo "ADMIN_DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)" >> .env
+
+# 2) 构建并启动
+docker compose --profile admin up -d --build admin
+
+# 3) 从你本机开隧道访问（它只发布在宿主 loopback 上）
+ssh -L 8642:127.0.0.1:8642 <user>@<server>
+#    浏览器打开 http://127.0.0.1:8642/ ，用 ADMIN_USER/ADMIN_PASSWORD 登录
+```
+
+它解决的正是「首次登录」那三个坑：`docker logs` 跨重启保留（它只读 `since=<本次启动时间>`
+的窗口并取最新的那个 token）、日志里的地址是容器内地址（它用 `DSH_SITE_ADDRESS` 拼出浏览器可用的
+`https://<域名>/?token=…`）、容器停了 token 就失效（它一并返回容器状态并在页面说明）。
+脚本也能用：`curl -s -u "$ADMIN_USER:$ADMIN_PASSWORD" http://127.0.0.1:8642/api/token.txt`。
+
+⚠️ **启用前必须知道两条**（详见 [`admin/README.md`](admin/README.md)「安全」）：
+
+1. 它**明文显示 token**，而 token 等同于 Harness GUI 的密码；所以 `ADMIN_PASSWORD` 是**必填**的
+   （compose 用 `:?` 拦一道，`app/main.py` 自己再拦一道：绑定非 loopback 且没有密码时**拒绝启动**），
+   并且它只发布到 **宿主 `127.0.0.1`**。
+2. 为了读另一个容器的日志，它必须挂 `/var/run/docker.sock`，那**等同于宿主机的 root**。
+   这是它与「只是读日志」不相称的一项权限，没有更窄的路；请把 `admin` 容器当作可信基础设施，
+   不要把它接到公网，也不要把它加进 Caddy 的站点。
+
+其余可调项（`ADMIN_PORT`、`ADMIN_USER`、`ADMIN_CONTAINER`、`ADMIN_REFRESH_SECONDS`）见 `.env.example`。
+不想构建镜像时，它也可以在宿主机上直接跑（`admin/run.sh`，同样需要能访问 `/var/run/docker.sock`），
+那是开发/备用路径。
+
+它默认读**本机**的 daemon。要让它读**远程** daemon（`DOCKER_HOST` + TLS 客户端证书）**代码不用改**
+（用的就是 `docker.from_env()`），但要把 `DOCKER_*` 三个变量加进 compose 的 `admin.environment`
+并**删掉那条 socket 挂载**——否则它会同时握着本机和远程两份 root 等价权限。
+完整步骤、已核实的变量语义和排查方法见 [`admin/README.md`](admin/README.md)「指向远程 daemon」。
 
 ## 设置页为什么现在能用（本镜像的补丁）
 
@@ -488,6 +536,15 @@ tar czf "dsh-home-$(date +%F).tgz" -C data/dsh .
 docker compose exec dsh dsh plugin --profile web add <package>
 docker compose exec dsh dsh plugin --profile web remove <package>
 # 插件集合变更需要重启 profile： docker compose restart dsh
+
+# 可选的管理端（admin profile；不用它就不受任何影响）
+docker compose --profile admin up -d --build admin   # 构建并启动
+docker compose --profile admin logs -f admin         # 跟踪它自己的日志（不含 token）
+docker compose --profile admin restart admin         # 重启
+docker compose --profile admin down                  # 连它一起停掉
+
+# 注意：`down` 不带 profile 时不会动 admin —— 它属于 admin profile，
+# 普通 `docker compose up -d` / `down` 都看不到它。这是刻意的。
 ```
 
 ## 配置项

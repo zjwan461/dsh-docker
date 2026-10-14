@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>dsh 管理端</title>
+<style>
+  :root {
+    --bg: #0f1117; --panel: #171a23; --line: #262b38; --fg: #e6e9f0;
+    --muted: #8b93a7; --accent: #4f8cff; --ok: #35c48a; --warn: #e0a83a; --bad: #e0605c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 28px 20px 60px; background: var(--bg); color: var(--fg);
+    font: 14px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans CJK SC",
+          "Microsoft YaHei", sans-serif;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; }
+  header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 22px; }
+  h1 { font-size: 19px; margin: 0; font-weight: 600; letter-spacing: .3px; }
+  .pill { font-size: 12px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+  .pill.ok { color: var(--ok); border-color: #1f5c45; background: #12241d; }
+  .pill.bad { color: var(--bad); border-color: #5c2a29; background: #241413; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; margin-bottom: 16px; }
+  .label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .8px; margin-bottom: 8px; }
+  .token {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 15px; word-break: break-all; background: #0c0e14; border: 1px solid var(--line);
+    border-radius: 8px; padding: 12px 14px; min-height: 45px;
+  }
+  .token.hidden { color: var(--muted); letter-spacing: 2px; }
+  .url { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; word-break: break-all; color: #b9c2d6; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
+  button, a.btn {
+    font: inherit; font-size: 13px; cursor: pointer; padding: 7px 14px; border-radius: 8px;
+    border: 1px solid var(--line); background: #1e2230; color: var(--fg); text-decoration: none;
+  }
+  button:hover, a.btn:hover { border-color: #3a4152; background: #242938; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.primary:hover { background: #3f7bef; }
+  button:disabled { opacity: .5; cursor: default; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px 22px; }
+  .kv .k { font-size: 12px; color: var(--muted); }
+  .kv .v { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; word-break: break-all; }
+  .warn { border-color: #4a3a18; background: #1d1910; }
+  .warn li { margin: 4px 0; color: #e8c98a; font-size: 13px; }
+  ul { margin: 0; padding-left: 20px; }
+  details { margin-top: 4px; }
+  summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+  pre {
+    margin: 12px 0 0; padding: 12px 14px; background: #0c0e14; border: 1px solid var(--line);
+    border-radius: 8px; overflow: auto; max-height: 420px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px;
+    color: #a8b3c9; white-space: pre-wrap; word-break: break-all;
+  }
+  footer { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; color: var(--muted); font-size: 12px; margin-top: 22px; }
+  .note { margin-top: 10px; color: var(--muted); font-size: 12px; }
+  .flash { color: var(--ok); font-size: 12px; opacity: 0; transition: opacity .2s; }
+  .flash.show { opacity: 1; }
+  .err { color: var(--bad); font-size: 13px; word-break: break-all; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>dsh 管理端</h1>
+    <span id="status" class="pill">读取中…</span>
+    <span id="discovery" class="pill" style="display:none"></span>
+  </header>
+
+  <div id="error" class="card warn" style="display:none">
+    <div class="label">错误</div>
+    <div id="error-text" class="err"></div>
+  </div>
+
+  <div class="card">
+    <div class="label">登录 token</div>
+    <div id="token" class="token hidden">—</div>
+    <div class="row">
+      <button id="reveal" class="primary">显示 token</button>
+      <button id="copy-token">复制 token</button>
+      <button id="reload">立即刷新</button>
+      <span id="flash" class="flash">已复制</span>
+    </div>
+    <div class="note">token 每次容器重启都会重新生成，且不落盘；它等同于密码，不要外传。</div>
+  </div>
+
+  <div class="card">
+    <div class="label">浏览器登录链接</div>
+    <div id="public-url" class="url">—</div>
+    <div class="row">
+      <button id="copy-url" class="primary">复制链接</button>
+      <a id="open-url" class="btn" href="#" target="_blank" rel="noopener noreferrer">打开</a>
+    </div>
+    <div class="note" id="url-note"></div>
+  </div>
+
+  <div id="warnings" class="card warn" style="display:none">
+    <div class="label">提示</div>
+    <ul id="warning-list"></ul>
+  </div>
+
+  <div class="card">
+    <div class="label">运行状态</div>
+    <div class="grid" id="meta"></div>
+  </div>
+
+  <div class="card">
+    <details>
+      <summary>启动日志（本次运行）</summary>
+      <pre id="log">—</pre>
+    </details>
+  </div>
+
+  <footer>
+    <span id="countdown">—</span>
+    <span>·</span>
+    <span id="generated">—</span>
+  </footer>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const state = { token: null, revealed: false, publicUrl: null, refresh: 5, left: 5, timer: null };
+
+function text(node, value) { node.textContent = value == null || value === "" ? "—" : String(value); }
+
+function localTime(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
+         `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+function flash() {
+  const f = $("flash");
+  f.classList.add("show");
+  setTimeout(() => f.classList.remove("show"), 1200);
+}
+
+async function copy(value, label) {
+  if (!value) return;
+  try {
+    await navigator.clipboard.writeText(value);
+  } catch (e) {
+    // clipboard API needs a secure context; fall back to a hidden textarea
+    const ta = document.createElement("textarea");
+    ta.value = value; ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand("copy"); } catch (_) {}
+    ta.remove();
+  }
+  flash();
+}
+
+function renderMeta(items) {
+  const box = $("meta");
+  box.textContent = "";
+  for (const [k, v] of items) {
+    const cell = document.createElement("div");
+    cell.className = "kv";
+    const kk = document.createElement("div"); kk.className = "k"; kk.textContent = k;
+    const vv = document.createElement("div"); vv.className = "v"; text(vv, v);
+    cell.append(kk, vv);
+    box.append(cell);
+  }
+}
+
+function render(data) {
+  const container = data.container || {};
+  const token = data.token || {};
+  const log = data.log || {};
+  const urls = data.urls || {};
+
+  // status pill
+  const pill = $("status");
+  if (!data.ok) { pill.className = "pill bad"; pill.textContent = "读取失败"; }
+  else if (container.running) { pill.className = "pill ok"; pill.textContent = "容器运行中"; }
+  else { pill.className = "pill bad"; pill.textContent = "容器已停止"; }
+
+  const disc = $("discovery");
+  if (container.discovery) { disc.style.display = ""; disc.textContent = "发现方式：" + container.discovery; }
+  else disc.style.display = "none";
+
+  // error card
+  if (!data.ok) {
+    $("error").style.display = "";
+    text($("error-text"), data.error || "未知错误");
+  } else {
+    $("error").style.display = "none";
+  }
+
+  // token
+  state.token = token.value || null;
+  const tokenBox = $("token");
+  if (!token.value) {
+    tokenBox.className = "token";
+    tokenBox.textContent = "当前日志里没有 token";
+    $("reveal").disabled = true;
+  } else {
+    $("reveal").disabled = false;
+    tokenBox.className = "token" + (state.revealed ? "" : " hidden");
+    tokenBox.textContent = state.revealed ? token.value : "•".repeat(43);
+  }
+
+  // public URL
+  state.publicUrl = urls.public || null;
+  text($("public-url"), urls.public || "（没有 DSH_SITE_ADDRESS，无法生成）");
+  $("copy-url").disabled = !urls.public;
+  if (urls.public) {
+    $("open-url").href = urls.public;
+    $("open-url").style.pointerEvents = "auto";
+    $("open-url").style.opacity = "1";
+  } else {
+    $("open-url").removeAttribute("href");
+    $("open-url").style.pointerEvents = "none";
+    $("open-url").style.opacity = ".5";
+  }
+  text($("url-note"), urls.loopback
+    ? "日志里的原始地址（容器内可见，宿主浏览器到不了）：" + urls.loopback
+    : "日志里没有出现容器内地址。");
+
+  // warnings
+  const warnings = data.warnings || [];
+  $("warnings").style.display = warnings.length ? "" : "none";
+  const list = $("warning-list");
+  list.textContent = "";
+  for (const w of warnings) {
+    const li = document.createElement("li");
+    li.textContent = w;
+    list.append(li);
+  }
+
+  // meta
+  renderMeta([
+    ["容器", container.name || "—"],
+    ["状态", container.status || "—"],
+    ["容器启动时间", localTime(container.started_at)],
+    ["token 生成时间", localTime(token.issued_at)],
+    ["token 是否有效", token.found ? (token.stale ? "可能已失效" : "有效") : "—"],
+    ["日志窗口内 token 数", token.matches_in_window == null ? "—" : token.matches_in_window],
+    ["日志起始（--since）", localTime(log.since)],
+    ["读取行数", log.lines_read == null ? "—" : log.lines_read],
+  ]);
+
+  text($("log"), (log.startup_lines || []).join("\n") || "（这次运行没有读到日志）");
+  text($("generated"), "报告生成于 " + localTime(data.generated_at));
+}
+
+async function load() {
+  try {
+    const res = await fetch("/api/token", { cache: "no-store" });
+    if (res.status === 401) {
+      $("status").className = "pill bad";
+      $("status").textContent = "需要认证";
+      $("error").style.display = "";
+      text($("error-text"), "这个管理端设置了 ADMIN_PASSWORD，请用配置的账号密码登录。");
+      return;
+    }
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    render(await res.json());
+  } catch (e) {
+    $("status").className = "pill bad";
+    $("status").textContent = "读取失败";
+    $("error").style.display = "";
+    text($("error-text"), String(e));
+  }
+}
+
+async function loadConfig() {
+  try {
+    const res = await fetch("/api/config", { cache: "no-store" });
+    if (!res.ok) return;
+    const cfg = await res.json();
+    if (cfg.refresh_seconds) { state.refresh = cfg.refresh_seconds; state.left = cfg.refresh_seconds; }
+  } catch (e) { /* keep defaults */ }
+}
+
+function tick() {
+  state.left -= 1;
+  if (state.left <= 0) { state.left = state.refresh; load(); }
+  text($("countdown"), state.left + " 秒后自动刷新");
+}
+
+$("reveal").onclick = () => {
+  state.revealed = !state.revealed;
+  $("reveal").textContent = state.revealed ? "隐藏 token" : "显示 token";
+  const box = $("token");
+  if (state.token) {
+    box.className = "token" + (state.revealed ? "" : " hidden");
+    box.textContent = state.revealed ? state.token : "•".repeat(43);
+  }
+};
+$("copy-token").onclick = () => copy(state.token);
+$("copy-url").onclick = () => copy(state.publicUrl);
+$("reload").onclick = () => { state.left = state.refresh; load(); };
+
+loadConfig();
+load();
+state.timer = setInterval(tick, 1000);
+</script>
+</body>
+</html>
