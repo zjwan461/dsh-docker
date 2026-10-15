@@ -90,8 +90,8 @@
     <div class="label">浏览器登录链接</div>
     <div id="public-url" class="url">—</div>
     <div class="row">
-      <button id="copy-url" class="primary">复制链接</button>
-      <a id="open-url" class="btn" href="#" target="_blank" rel="noopener noreferrer">打开</a>
+      <button id="copy-https" class="primary">复制 https 链接</button>
+      <button id="copy-http">复制 http 链接</button>
     </div>
     <div class="note" id="url-note"></div>
   </div>
@@ -207,22 +207,14 @@ function render(data) {
   }
 
   // public URL
+  // public URL
   state.publicUrl = urls.public || null;
   text($("public-url"), urls.public || "（没有 DSH_SITE_ADDRESS，无法生成）");
-  $("copy-url").disabled = !urls.public;
-  if (urls.public) {
-    $("open-url").href = urls.public;
-    $("open-url").style.pointerEvents = "auto";
-    $("open-url").style.opacity = "1";
-  } else {
-    $("open-url").removeAttribute("href");
-    $("open-url").style.pointerEvents = "none";
-    $("open-url").style.opacity = ".5";
-  }
+  $("copy-https").disabled = !urls.public;
+  $("copy-http").disabled = !urls.public;
   text($("url-note"), urls.loopback
     ? "日志里的原始地址（容器内可见，宿主浏览器到不了）：" + urls.loopback
     : "日志里没有出现容器内地址。");
-
   // warnings
   const warnings = data.warnings || [];
   $("warnings").style.display = warnings.length ? "" : "none";
@@ -295,7 +287,8 @@ $("reveal").onclick = () => {
   }
 };
 $("copy-token").onclick = () => copy(state.token);
-$("copy-url").onclick = () => copy(state.publicUrl);
+$("copy-https").onclick = () => copy(state.publicUrl);
+$("copy-http").onclick = () => copy(state.publicUrl ? state.publicUrl.replace(/^https:/, "http:") : null);
 $("reload").onclick = () => { state.left = state.refresh; load(); };
 
 loadConfig();
