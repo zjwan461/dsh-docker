@@ -1,0 +1,54 @@
+{
+  "name": "dsh-minimax-h3",
+  "version": "0.1.0",
+  "description": "MiniMax H3 video studio for DeepSeek Harness: text-to-video, image-to-video and reference-to-video through ComfyUI, with shot boards and FFmpeg finishing. / 面向 DeepSeek Harness 的 MiniMax H3 视频工作室：文生视频、图生视频、参考生视频，含分镜管理与 FFmpeg 后期。",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./client/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "files": [
+    "lib",
+    "client",
+    "scripts",
+    "cordis.patch.yml",
+    "locale",
+    "icon.svg",
+    "README.md"
+  ],
+  "keywords": [
+    "deepseek",
+    "harness",
+    "dsh",
+    "dsh-plugin",
+    "minimax",
+    "minimax-h3",
+    "comfyui",
+    "video-generation",
+    "ffmpeg"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.19"
+  },
+  "icon": "./icon.svg",
+  "meta": {
+    "title": "MiniMax H3 视频",
+    "description": "用 ComfyUI 跑 MiniMax H3 生成视频：文生 / 图生 / 参考生，带分镜管理与 FFmpeg 后期。"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-locale"
+      ]
+    }
+  }
+}

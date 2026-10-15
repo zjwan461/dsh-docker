@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "MiniMax H3 Video",
+    "description": "Run MiniMax H3 video generation on ComfyUI: the three official text-to-video, image-to-video and reference-to-video flows, with shot boards, reference assets and FFmpeg finishing."
+  }
+}

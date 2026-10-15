@@ -1,0 +1,6 @@
+# dsh-minimax-h3 bundle patch: inserts the MiniMax H3 video studio into a
+# profile's layer stack. Every tunable lives on this row's `config`, so a
+# user's own patch layer can override any of them without touching the plugin.
+- insert:
+    - id: minimax-h3
+      name: 'dsh-minimax-h3'

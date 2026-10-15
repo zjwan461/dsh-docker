@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "MiniMax H3 视频",
+    "description": "用 ComfyUI 跑 MiniMax H3 生成视频：文生视频、图生视频、参考生视频三种官方流程，带分镜管理、参考素材与 FFmpeg 后期。"
+  }
+}
