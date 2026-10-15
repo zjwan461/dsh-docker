@@ -13,6 +13,7 @@
  */
 import { createReadStream } from 'node:fs';
 import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { randomUUID } from 'node:crypto';
 import { basename } from 'node:path';
 import {
@@ -66,28 +67,64 @@ function redact(config, detection, hasApiKey, writable) {
     };
 }
 
-/** Serve a local file with Range support, so video seeking works. */
-function serveLocal(request, response, file, contentType) {
+/**
+ * Pipe a source into the response without risking the process.
+ *
+ * `source.pipe(response)` is a footgun here: `pipe` attaches no `error` listener
+ * to the *source*, so a read failure (the file was deleted mid-stream, the
+ * upstream socket dropped, ComfyUI went away) becomes an unhandled `'error'`
+ * event — which throws and takes down the entire DSH host process, not merely
+ * this request. `pipeline` tears both ends down and hands the failure back.
+ */
+function pipeToResponse(source, response) {
+    void pipeline(source, response).catch(() => {
+        // Either the client went away or the source failed; both are terminal for
+        // this response and neither is worth reporting.
+        response.destroy?.();
+    });
+}
+
+/** Answer with the whole file. Also the path taken when a Range is ignored. */
+function serveWhole(request, response, file, contentType, headers) {
+    response.writeHead(200, { ...headers, 'content-length': file.size });
+    if (methodIs(request, 'HEAD')) {
+        response.end();
+        return;
+    }
+    pipeToResponse(createReadStream(file.path), response);
+}
+
+/**
+ * Serve a local file with Range support, so video seeking works.
+ *
+ * Only a single range is honoured. RFC 7233 requires a Range the server cannot
+ * parse to be **ignored** — answer 200 with the whole file — and reserves 416
+ * for a satisfiable-looking range that falls outside it. Browsers do send
+ * multi-range requests for some media, and answering those with 416 broke
+ * playback outright.
+ *
+ * Exported for testing: it takes plain request/response objects.
+ */
+export function serveLocal(request, response, file, contentType) {
     const size = file.size;
-    const range = request.headers.range;
     const headers = {
         'content-type': contentType,
         'accept-ranges': 'bytes',
         'cache-control': 'no-store',
     };
-    if (typeof range !== 'string' || range === '') {
-        response.writeHead(200, { ...headers, 'content-length': size });
-        if (methodIs(request, 'HEAD')) {
-            response.end();
-            return;
-        }
-        createReadStream(file.path).pipe(response);
+    const range = request.headers.range;
+    const trimmed = typeof range === 'string' ? range.trim() : '';
+    const match = trimmed === '' ? null : /^bytes=(\d*)-(\d*)$/.exec(trimmed);
+    // No Range, an unparseable one, a multi-range list, or the degenerate
+    // `bytes=`: send everything and let the client deal with it.
+    if (match === null || (match[1] === '' && match[2] === '')) {
+        serveWhole(request, response, file, contentType, headers);
         return;
     }
-    const match = /^bytes=(\d*)-(\d*)$/.exec(range.trim());
-    if (match === null) {
-        response.writeHead(416, { ...headers, 'content-range': `bytes */${size}` });
-        response.end();
+    if (size === 0) {
+        // No range can be satisfied out of nothing; a plain empty 200 is the
+        // least surprising answer.
+        serveWhole(request, response, file, contentType, headers);
         return;
     }
     const startRaw = match[1];
@@ -115,7 +152,7 @@ function serveLocal(request, response, file, contentType) {
         response.end();
         return;
     }
-    createReadStream(file.path, { start, end }).pipe(response);
+    pipeToResponse(createReadStream(file.path, { start, end }), response);
 }
 
 /**
@@ -319,7 +356,7 @@ export function mountH3Routes(ctx, deps) {
                 response.end();
                 return;
             }
-            Readable.fromWeb(upstream.body).pipe(response);
+            pipeToResponse(Readable.fromWeb(upstream.body), response);
         }
         catch (error) {
             if (!response.headersSent) sendJson(response, 502, { error: errorMessage(error) });

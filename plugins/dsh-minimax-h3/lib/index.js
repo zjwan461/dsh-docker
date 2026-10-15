@@ -70,6 +70,9 @@ export async function apply(ctx, entryConfig) {
         maxRenders: baseline.maxRenders,
     });
     await store.init();
+    // Anything still marked in-flight belongs to a previous process, and a record
+    // left at `queued` would make the panel poll the ComfyUI queue forever.
+    await store.reconcileRuns();
 
     // Settings the user changed in the panel are layered over the entry config.
     // `dataDir` is excluded: it was already used to build the store, and a saved

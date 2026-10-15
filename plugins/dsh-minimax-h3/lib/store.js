@@ -212,6 +212,33 @@ export class H3Store {
         });
     }
 
+    /**
+     * Close out runs that were still in flight when the process last stopped.
+     *
+     * Nothing survives a DSH restart to settle them, and a record left at
+     * `queued`/`running` has two consequences: the panel polls the ComfyUI queue
+     * forever (its "is anything in flight" test never goes false), and the run
+     * looks perpetually unfinished. ComfyUI may well have completed the work —
+     * the output file is still on its disk and reachable through the asset list
+     * — but this plugin cannot claim a result it never fetched, so the honest
+     * outcome is `interrupted` with a pointer to where the clip would be.
+     *
+     * @returns how many records were changed.
+     */
+    async reconcileRuns() {
+        return this.runsFile.update((list) => {
+            let changed = 0;
+            for (const run of list) {
+                if (run.status !== 'queued' && run.status !== 'running') continue;
+                run.status = 'interrupted';
+                run.error = 'DSH stopped while this run was in flight. If ComfyUI finished it, the clip is still on the server — look under “已生成” in the asset picker or run h3_runs action: "list".';
+                run.finishedAt = run.finishedAt ?? Date.now();
+                changed += 1;
+            }
+            return changed;
+        });
+    }
+
     /* ---------------------------------------------------------------- */
     /* Post-processing renders                                           */
     /* ---------------------------------------------------------------- */

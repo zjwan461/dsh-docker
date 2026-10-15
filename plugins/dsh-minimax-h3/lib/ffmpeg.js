@@ -20,7 +20,7 @@
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { readdir, writeFile } from 'node:fs/promises';
-import { extname, isAbsolute, join } from 'node:path';
+import { basename, dirname, extname, isAbsolute, join } from 'node:path';
 import { homedir } from 'node:os';
 
 /** Raised when no usable FFmpeg could be found, or it exited non-zero. */
@@ -36,63 +36,142 @@ export class FFmpegError extends Error {
 /* Locating the binary                                                 */
 /* ------------------------------------------------------------------ */
 
-/** Where a portable FFmpeg tends to hide on a Windows machine. */
-function candidatePaths(config) {
+/**
+ * Where an FFmpeg tends to live.
+ *
+ * A bare `ffmpeg` resolves through PATH and covers most system installs on
+ * every platform; the absolute entries are the places a package manager or a
+ * portable ComfyUI build hides one that PATH does not see. Windows and POSIX
+ * get *separate* lists rather than one union, so a Windows-looking path (from a
+ * stray environment variable) can never be probed on Linux, and vice versa.
+ */
+export function candidatePaths(config) {
     const candidates = [];
     const push = (value) => {
         if (typeof value === 'string' && value.trim() !== '') candidates.push(value.trim());
     };
     push(config.ffmpegPath);
-    const local = process.env.LOCALAPPDATA ?? '';
-    const programData = process.env.ProgramData ?? 'C:\\ProgramData';
     push('ffmpeg');
-    push('C:\\ffmpeg\\bin\\ffmpeg.exe');
-    if (local !== '') push(join(local, 'Microsoft', 'WinGet', 'Links', 'ffmpeg.exe'));
-    push(join(programData, 'chocolatey', 'bin', 'ffmpeg.exe'));
-    push('D:\\ffmpeg\\bin\\ffmpeg.exe');
-    push(join(homedir(), 'scoop', 'shims', 'ffmpeg.exe'));
+    const home = homedir();
+
+    if (process.platform === 'win32') {
+        const local = process.env.LOCALAPPDATA ?? '';
+        const programData = process.env.ProgramData ?? 'C:\\ProgramData';
+        push('C:\\ffmpeg\\bin\\ffmpeg.exe');
+        if (local !== '') push(join(local, 'Microsoft', 'WinGet', 'Links', 'ffmpeg.exe'));
+        push(join(programData, 'chocolatey', 'bin', 'ffmpeg.exe'));
+        push('D:\\ffmpeg\\bin\\ffmpeg.exe');
+        push(join(home, 'scoop', 'shims', 'ffmpeg.exe'));
+    }
+    else {
+        push('/usr/bin/ffmpeg');
+        push('/usr/local/bin/ffmpeg');
+        push('/snap/bin/ffmpeg');
+        push('/opt/ffmpeg/bin/ffmpeg');
+        // `pip install --user` / pipx, and a plain ~/bin.
+        push(join(home, '.local', 'bin', 'ffmpeg'));
+        push(join(home, 'bin', 'ffmpeg'));
+        // Conda is a very common way to run ComfyUI on Linux, and its FFmpeg is
+        // not on PATH unless that env was activated in this same shell.
+        const conda = process.env.CONDA_PREFIX ?? '';
+        if (conda !== '') push(join(conda, 'bin', 'ffmpeg'));
+    }
+
     for (const dir of config.comfyuiDirs ?? []) {
+        // A portable ComfyUI ships an FFmpeg somewhere next to the app, and the
+        // exact spot moved between releases, so all plausible ones are probed on
+        // both platforms.
+        push(join(dir, 'ffmpeg'));
         push(join(dir, 'ffmpeg.exe'));
+        push(join(dir, 'bin', 'ffmpeg'));
         push(join(dir, 'bin', 'ffmpeg.exe'));
+        push(join(dir, 'python_embeded', 'ffmpeg'));
         push(join(dir, 'python_embeded', 'ffmpeg.exe'));
+        push(join(dir, 'python_embeded', 'bin', 'ffmpeg'));
     }
     return candidates;
 }
 
 /**
- * ComfyUI's Windows portable build sometimes ships FFmpeg inside
- * `imageio_ffmpeg`'s binaries folder. Those names carry a platform suffix, so
- * the directory is globbed rather than named.
+ * FFmpeg binaries that ComfyUI's bundled `imageio_ffmpeg` ships.
+ *
+ * The layout differs by platform and release: the Windows portable build keeps
+ * site-packages under `python_embeded/Lib/`, POSIX keeps it under
+ * `lib/python3.x/`, and the binary is `ffmpeg-win64-v….exe` on one and
+ * `ffmpeg-linux-x86_64-v…` on the other. So both the directory shape and the
+ * name pattern are discovered rather than assumed.
  */
-async function imageioCandidates(config) {
+async function imageioBinariesUnder(dir) {
     const found = [];
-    for (const dir of config.comfyuiDirs ?? []) {
-        const binaryDir = join(dir, 'python_embeded', 'Lib', 'site-packages', 'imageio_ffmpeg', 'binaries');
+    const collect = async (binaryDir) => {
+        let entries;
         try {
-            const entries = await readdir(binaryDir);
-            for (const entry of entries) {
-                if (/^ffmpeg.*\.exe$/i.test(entry)) found.push(join(binaryDir, entry));
-            }
+            entries = await readdir(binaryDir);
         }
         catch {
-            // No site-packages there; the next candidate decides.
+            return;
         }
+        for (const entry of entries) {
+            // `ffmpeg`, `ffmpeg.exe`, `ffmpeg-linux-x86_64-v7.0.2`, `ffmpeg-win64-v7.0.2.exe`.
+            if (/^ffmpeg([-_.].*)?(\.exe)?$/i.test(entry)) found.push(join(binaryDir, entry));
+        }
+    };
+    await collect(join(dir, 'site-packages', 'imageio_ffmpeg', 'binaries'));
+    let entries = [];
+    try {
+        entries = await readdir(dir, { withFileTypes: true });
+    }
+    catch {
+        entries = [];
+    }
+    for (const entry of entries) {
+        if (!entry.isDirectory() || !/^python\d/i.test(entry.name)) continue;
+        await collect(join(dir, entry.name, 'site-packages', 'imageio_ffmpeg', 'binaries'));
     }
     return found;
 }
 
-/** Run a binary with `-version` and return its first line, or undefined. */
+async function imageioCandidates(config) {
+    const found = [];
+    for (const dir of config.comfyuiDirs ?? []) {
+        const roots = [
+            join(dir, 'python_embeded', 'Lib'), // Windows portable
+            join(dir, 'python_embeded', 'lib'), // POSIX portable
+            join(dir, 'python_embeded'),        // site-packages directly beneath it
+            join(dir, 'venv', 'lib'),           // a hand-made venv
+            join(dir, '.venv', 'lib'),
+        ];
+        for (const root of roots) found.push(...await imageioBinariesUnder(root));
+    }
+    return found;
+}
+
+/**
+ * Run a binary with `-version`.
+ *
+ * Always resolves, and says *why* it failed. That distinction is the whole
+ * value: on Linux the usual failure is `EACCES` (found it, not executable) or
+ * `ENOENT` (not there at all), and reporting both as "not runnable" hides the
+ * one thing the user needs to know.
+ */
 async function probeBinary(exe) {
     return new Promise((resolvePromise) => {
         let child;
         try {
             child = spawn(exe, ['-version'], { shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
         }
-        catch {
-            resolvePromise(undefined);
+        catch (error) {
+            resolvePromise({ ok: false, reason: error?.code ?? String(error) });
             return;
         }
         let out = '';
+        let settled = false;
+        const done = (result) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            resolvePromise(result);
+        };
         const timer = setTimeout(() => {
             try {
                 child.kill();
@@ -100,22 +179,20 @@ async function probeBinary(exe) {
             catch {
                 // Already gone.
             }
-            resolvePromise(undefined);
+            done({ ok: false, reason: 'timed out' });
         }, 15_000);
         child.stdout?.on('data', (chunk) => {
             out += chunk.toString();
         });
-        child.on('error', () => {
-            clearTimeout(timer);
-            resolvePromise(undefined);
+        child.on('error', (error) => {
+            done({ ok: false, reason: error?.code ?? String(error) });
         });
         child.on('close', (code) => {
-            clearTimeout(timer);
             if (code !== 0 || out === '') {
-                resolvePromise(undefined);
+                done({ ok: false, reason: `exit ${code}` });
                 return;
             }
-            resolvePromise(out.split('\n')[0].trim());
+            done({ ok: true, version: out.split('\n')[0].trim() });
         });
     });
 }
@@ -123,13 +200,27 @@ async function probeBinary(exe) {
 /** Cached detection result, keyed by the config fields that can change it. */
 let detectionCache;
 
-/** Derive the ffprobe path from an ffmpeg path (sibling binary). */
+/**
+ * `ffmpeg` → `ffprobe`, `ffmpeg.exe` → `ffprobe.exe`,
+ * `/usr/bin/ffmpeg` → `/usr/bin/ffprobe`.
+ *
+ * Derived from the *basename*, never the extension: on POSIX `/usr/bin/ffmpeg`
+ * has no extension, and an extension-based version produced
+ * `/usr/bin/ffmpegprobe` — so ffprobe was never found as a sibling on Linux and
+ * every duration-dependent step (fade-out, loudness-free concat normalization)
+ * silently degraded.
+ */
+export function ffprobeSibling(ffmpeg) {
+    const base = basename(ffmpeg);
+    const probeName = /ffmpeg/i.test(base) ? base.replace(/ffmpeg/i, 'ffprobe') : `ffprobe${extname(base)}`;
+    if (!isAbsolute(ffmpeg)) return probeName;
+    return join(dirname(ffmpeg), probeName);
+}
+
+/** The configured ffprobe wins; otherwise it is the sibling of the found ffmpeg. */
 function siblingProbe(config, ffmpeg) {
     const explicit = (config.ffprobePath ?? '').trim();
-    if (explicit !== '') return explicit;
-    if (!isAbsolute(ffmpeg)) return 'ffprobe';
-    const ext = extname(ffmpeg);
-    return ext === '' ? `${ffmpeg}probe` : ffmpeg.slice(0, -ext.length) + 'probe' + ext;
+    return explicit !== '' ? explicit : ffprobeSibling(ffmpeg);
 }
 
 /**
@@ -153,29 +244,34 @@ export async function resolveFFmpeg(config, opts = {}) {
             tried.push({ candidate, reason: 'not found' });
             continue;
         }
-        const version = await probeBinary(candidate);
-        if (version === undefined) {
-            tried.push({ candidate, reason: 'not runnable' });
+        const probe = await probeBinary(candidate);
+        if (probe.ok !== true) {
+            // The real error code (`ENOENT`, `EACCES`, `exit 1`) is what makes a
+            // Linux failure diagnosable; "not runnable" would hide it.
+            tried.push({ candidate, reason: probe.reason });
             continue;
         }
         const ffprobe = siblingProbe(config, candidate);
-        const probeVersion = await probeBinary(ffprobe);
+        const probeResult = await probeBinary(ffprobe);
         const value = {
             ok: true,
             ffmpeg: candidate,
-            ffprobe: probeVersion === undefined ? undefined : ffprobe,
-            version,
-            probeVersion,
+            ffprobe: probeResult.ok === true ? ffprobe : undefined,
+            version: probe.version,
+            probeVersion: probeResult.ok === true ? probeResult.version : undefined,
             tried,
         };
         detectionCache = { key, at: Date.now(), value };
         return value;
     }
 
+    const installHint = process.platform === 'win32'
+        ? 'winget install Gyan.FFmpeg, or choco install ffmpeg'
+        : 'apt install ffmpeg (or dnf / pacman / brew install ffmpeg)';
     const value = {
         ok: false,
         tried,
-        error: 'FFmpeg not found. Install it (winget install Gyan.FFmpeg, choco install ffmpeg, or drop ffmpeg.exe next to ComfyUI) and set "FFmpeg 路径" in the plugin settings.',
+        error: `FFmpeg not found. Install it (${installHint}), or set the FFmpeg path in the plugin settings. FFprobe is optional, but without it duration-dependent steps (fade-out, concat normalization) are skipped.`,
     };
     detectionCache = { key, at: Date.now(), value };
     return value;
@@ -239,8 +335,10 @@ export function runFFmpeg(exe, args, opts = {}) {
         signal?.addEventListener('abort', onAbort, { once: true });
 
         child.stdout?.on('data', (chunk) => {
-            stdout += chunk.toString();
+            // `-progress` output is only wanted for the progress callback; with no
+            // callback there is nothing to parse and no reason to accumulate it.
             if (typeof onProgress !== 'function') return;
+            stdout += chunk.toString();
             // -progress emits blocks of key=value lines ending with `progress=continue|end`.
             const lines = stdout.split('\n');
             stdout = lines.pop() ?? '';
@@ -360,12 +458,19 @@ export async function probeMedia(ffprobe, file, opts = {}) {
 /* ------------------------------------------------------------------ */
 
 /**
- * Make a path safe to embed inside a filtergraph value. Windows backslashes
- * become slashes and the drive colon is escaped — the two things that reliably
- * break `subtitles=`/`drawtext=` on this platform.
+ * Make a path safe to embed inside a filtergraph value.
+ *
+ * On Windows backslashes must become slashes and the drive colon escaped — the
+ * two things that reliably break `subtitles=`/`drawtext=`. On POSIX a backslash
+ * is a perfectly legal *filename* character, so rewriting it there would point
+ * the filter at a different file; only the colon and quote escapes apply.
+ *
+ * `platform` is injectable so both branches are testable from either host.
  */
-function filterPath(value) {
-    return String(value).replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'").replace(/,/g, '\\,');
+export function filterPath(value, platform = process.platform) {
+    const raw = String(value);
+    const normalized = platform === 'win32' ? raw.replace(/\\/g, '/') : raw;
+    return normalized.replace(/:/g, '\\:').replace(/'/g, "\\'").replace(/,/g, '\\,');
 }
 
 /** The nine anchor positions, as overlay x/y expressions. */

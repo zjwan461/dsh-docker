@@ -18,11 +18,12 @@ import assert from 'node:assert/strict';
 import { buildWorkflow, snapFrames, framesForDuration, DURATION_EXPR } from '../lib/workflows.js';
 import { resolveOptions, aspectOptions, inventory, LIMITS } from '../lib/params.js';
 import { MODE_IDS, MODES } from '../lib/models.js';
-import { POST_OPS, findOp, withDefaults, postOpCatalog } from '../lib/ffmpeg.js';
+import { POST_OPS, candidatePaths, filterPath, findOp, ffprobeSibling, withDefaults, postOpCatalog } from '../lib/ffmpeg.js';
+import { serveLocal } from '../lib/routes.js';
 import { H3Store } from '../lib/store.js';
 import { CONFIG_FIELDS, resolveConfig, sanitizeSettingsPatch } from '../lib/config.js';
 import { ComfyUIClient } from '../lib/comfy.js';
-import { createStudio } from '../lib/studio.js';
+import { createStudio, cacheNameFor, stamp } from '../lib/studio.js';
 
 let passed = 0;
 let failed = 0;
@@ -518,6 +519,172 @@ await checkAsync('diagnose reports endpoints, route prefix and H3 node presence'
 });
 
 /* ------------------------------------------------------------------ */
+console.log('\nFFmpeg discovery (Windows and POSIX)');
+
+check('ffprobe is derived from the ffmpeg basename, not its extension', () => {
+    // The POSIX case an extension-based derivation got wrong: `/usr/bin/ffmpeg`
+    // has no extension, so it used to produce `/usr/bin/ffmpegprobe`.
+    if (process.platform === 'win32') {
+        assert.equal(ffprobeSibling('C:\\ffmpeg\\bin\\ffmpeg.exe'), 'C:\\ffmpeg\\bin\\ffprobe.exe');
+    }
+    else {
+        assert.equal(ffprobeSibling('/usr/bin/ffmpeg'), '/usr/bin/ffprobe');
+        assert.equal(ffprobeSibling('/usr/local/bin/ffmpeg'), '/usr/local/bin/ffprobe');
+        assert.equal(ffprobeSibling('/snap/bin/ffmpeg'), '/snap/bin/ffprobe');
+    }
+    // Relative names behave identically on both platforms.
+    assert.equal(ffprobeSibling('ffmpeg'), 'ffprobe');
+    assert.equal(ffprobeSibling('ffmpeg.exe'), 'ffprobe.exe');
+    assert.equal(ffprobeSibling('ffmpeg-7'), 'ffprobe-7');
+    // A name that is not ffmpeg-derived still yields an ffprobe name.
+    assert.equal(ffprobeSibling('avconv'), 'ffprobe');
+});
+
+check('an explicit ffmpeg path is tried first', () => {
+    assert.equal(candidatePaths({ ffmpegPath: '  /my/ffmpeg  ', comfyuiDirs: [] })[0], '/my/ffmpeg');
+    assert.equal(candidatePaths({ comfyuiDirs: [] })[0], 'ffmpeg', 'PATH is otherwise the first candidate');
+});
+
+check('every ComfyUI portable layout is probed, on either platform', () => {
+    const dir = '/opt/ComfyUI';
+    const list = candidatePaths({ ffmpegPath: '', comfyuiDirs: [dir] });
+    // Expectations are built with `join` so the separator matches this platform.
+    for (const rel of [[], ['bin'], ['python_embeded'], ['python_embeded', 'bin']]) {
+        const expected = join(dir, ...rel, 'ffmpeg');
+        assert.ok(list.includes(expected), `missing ${expected}`);
+    }
+    for (const rel of [[], ['bin'], ['python_embeded']]) {
+        const expected = join(dir, ...rel, 'ffmpeg.exe');
+        assert.ok(list.includes(expected), `missing ${expected}`);
+    }
+});
+
+check('platform-specific locations never leak onto the other platform', () => {
+    const list = candidatePaths({ ffmpegPath: '', comfyuiDirs: [] });
+    if (process.platform === 'win32') {
+        assert.ok(list.includes('C:\\ffmpeg\\bin\\ffmpeg.exe'));
+        assert.ok(!list.includes('/usr/bin/ffmpeg'), 'a POSIX path must not be probed on Windows');
+    }
+    else {
+        assert.ok(list.includes('/usr/bin/ffmpeg'));
+        assert.ok(list.includes('/usr/local/bin/ffmpeg'));
+        assert.ok(!list.includes('C:\\ffmpeg\\bin\\ffmpeg.exe'), 'a Windows path must not be probed on POSIX');
+    }
+    // PATH is always tried, whatever the platform.
+    assert.ok(list.includes('ffmpeg'));
+});
+
+/* ------------------------------------------------------------------ */
+console.log('\nmedia serving and cache identity');
+
+/** A response object that records what the handler did. HEAD avoids the body. */
+function fakeResponse() {
+    const record = { status: 0, headers: {}, ended: false };
+    return {
+        record,
+        writeHead(status, headers) {
+            record.status = status;
+            Object.assign(record.headers, headers);
+        },
+        end() {
+            record.ended = true;
+        },
+    };
+}
+
+check('only a real, satisfiable range gets a 206', () => {
+    const file = { path: '/nonexistent', size: 1000 };
+    const head = (range, target = file) => {
+        const response = fakeResponse();
+        serveLocal(
+            { method: 'HEAD', headers: range === undefined ? {} : { range } },
+            response,
+            target,
+            'video/mp4',
+        );
+        return response.record;
+    };
+
+    assert.equal(head(undefined).status, 200, 'no Range → the whole file');
+    assert.equal(head('bytes=0-99').status, 206);
+    assert.equal(head('bytes=0-99').headers['content-range'], 'bytes 0-99/1000');
+    assert.equal(head('bytes=0-99').headers['content-length'], 100);
+    assert.equal(head('bytes=900-').headers['content-range'], 'bytes 900-999/1000');
+    assert.equal(head('bytes=-100').headers['content-range'], 'bytes 900-999/1000', 'a suffix range');
+    assert.equal(head('bytes=-99999').headers['content-range'], 'bytes 0-999/1000', 'an oversized suffix clamps');
+    assert.equal(head('bytes=0-99').ended, true, 'HEAD must not open a body');
+
+    // Satisfiable-looking but outside the file → 416, as RFC 7233 requires.
+    assert.equal(head('bytes=1000-').status, 416);
+    assert.equal(head('bytes=2000-3000').status, 416);
+
+    // Unparseable, multi-range, or degenerate → the Range must be IGNORED, not
+    // rejected. Answering a multi-range with 416 breaks media playback outright.
+    assert.equal(head('bytes=0-99,200-299').status, 200, 'a multi-range must not 416');
+    assert.equal(head('items=0-99').status, 200);
+    assert.equal(head('bytes=').status, 200);
+    assert.equal(head('bytes=0-99,200-299').headers['content-length'], 1000);
+
+    // A zero-byte file is answered plainly rather than with a pointless 416.
+    assert.equal(head('bytes=0-', { path: '/nonexistent', size: 0 }).status, 200);
+});
+
+check('cache names distinguish subfolder and type, not just the basename', () => {
+    const a = cacheNameFor({ filename: 'clip.mp4', subfolder: 'a', type: 'output' });
+    const b = cacheNameFor({ filename: 'clip.mp4', subfolder: 'b', type: 'output' });
+    const c = cacheNameFor({ filename: 'clip.mp4', subfolder: 'a', type: 'temp' });
+    const d = cacheNameFor({ filename: 'clip.mp4', subfolder: 'a', type: 'output' });
+    // The bug this fixes: two remote files sharing a basename used to resolve to
+    // the same cache path, so the second download silently reused the first.
+    assert.notEqual(a, b, 'same basename in different subfolders must not collide');
+    assert.notEqual(a, c, 'a different type must not collide');
+    assert.equal(a, d, 'the same reference must be stable across calls');
+    assert.equal(cacheNameFor({}), '', 'no filename means no cache name');
+
+    // A name long enough to be truncated by the length cap still stays unique,
+    // because the digest carries the identity.
+    const long1 = cacheNameFor({ filename: `${'x'.repeat(200)}1.mp4` });
+    const long2 = cacheNameFor({ filename: `${'x'.repeat(200)}2.mp4` });
+    assert.notEqual(long1, long2);
+    // Nothing that could escape the cache directory.
+    for (const value of [a, b, c, long1]) {
+        assert.ok(!/[\\/]/.test(value), `cache name contains a separator: ${value}`);
+        assert.ok(!value.includes('..'), `cache name contains ..: ${value}`);
+    }
+});
+
+check('output stamps carry milliseconds and never go backwards', () => {
+    const value = stamp();
+    assert.match(value, /^\d{8}-\d{6}-\d{3}$/, `unexpected stamp shape: ${value}`);
+    // The millisecond field is the whole point: at second resolution, two runs
+    // with the same output name inside one second would overwrite each other.
+    let previous = '';
+    for (let index = 0; index < 50; index += 1) {
+        const next = stamp();
+        assert.ok(next >= previous, `stamp went backwards: ${previous} → ${next}`);
+        previous = next;
+    }
+});
+
+await checkAsync('a broken file stream does not take the process down', async () => {
+    const { Writable } = await import('node:stream');
+    const sink = new Writable({ write(_chunk, _encoding, callback) { callback(); } });
+    sink.writeHead = () => {};
+    // Reading a file that is not there: with a bare `source.pipe(response)` the
+    // read stream's 'error' has no listener, which is an unhandled event — it
+    // throws and kills the whole host process, not just this response.
+    serveLocal(
+        { method: 'GET', headers: {} },
+        sink,
+        { path: join(root, 'definitely-not-here.mp4'), size: 1000 },
+        'video/mp4',
+    );
+    // Let the failing read surface. Reaching the assertion at all is the test.
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    assert.ok(true);
+});
+
+/* ------------------------------------------------------------------ */
 console.log('\nFFmpeg op argv construction');
 
 const workDir = join(tmpdir(), 'dsh-minimax-h3-smoke-work');
@@ -585,7 +752,19 @@ check('the op catalog is stable and free of closures', () => {
     assert.equal(new Set(ids).size, ids.length);
 });
 
-check('window paths are escaped for the subtitles filtergraph', async () => {
+check('filtergraph path escaping is correct on each platform', () => {
+    // Windows: backslashes become slashes and the drive colon is escaped.
+    assert.equal(filterPath('C:\\ffmpeg\\subs.srt', 'win32'), 'C\\:/ffmpeg/subs.srt');
+    // POSIX: a backslash is a legal filename character and must survive —
+    // rewriting it would point the filter at a different file.
+    assert.equal(filterPath('/tmp/odd\\name/subs.srt', 'linux'), '/tmp/odd\\name/subs.srt');
+    assert.equal(filterPath('/tmp/plain/subs.srt', 'linux'), '/tmp/plain/subs.srt');
+    // Quotes and commas are escaped on both.
+    assert.equal(filterPath("/tmp/it's.srt", 'linux'), "/tmp/it\\'s.srt");
+    assert.equal(filterPath('/tmp/a,b.srt', 'linux'), '/tmp/a\\,b.srt');
+});
+
+await checkAsync('window paths are escaped for the subtitles filtergraph', async () => {
     const op = findOp('subtitle');
     assert.ok(op !== undefined);
     const built = await op.build(opContext(op, { text: '1\n00:00:00,000 --> 00:00:01,000\nhi\n' }));
@@ -687,6 +866,50 @@ await checkAsync('a corrupt settings file falls back to the entry config', async
         resolveConfig({ baseUrl: 'http://from-file:1' }, dir, await store.loadSettings()).baseUrl,
         'http://from-file:1',
     );
+});
+
+await checkAsync('a run left in flight by a restart is closed out', async () => {
+    const store = new H3Store(join(root, 'reconcile'), {});
+    await store.init();
+    const queued = await store.saveRun({ mode: 't2v', status: 'queued', media: [] });
+    const running = await store.saveRun({ mode: 'r2v', status: 'running', media: [] });
+    const finished = await store.saveRun({ mode: 't2v', status: 'completed', media: [] });
+    const cancelled = await store.saveRun({ mode: 't2v', status: 'cancelled', media: [] });
+
+    // A record left at queued/running makes the panel poll the ComfyUI queue
+    // forever, because its "anything in flight" test never goes false.
+    assert.equal(await store.reconcileRuns(), 2, 'only the two in-flight records');
+    assert.equal((await store.getRun(queued.id)).status, 'interrupted');
+    assert.equal((await store.getRun(running.id)).status, 'interrupted');
+    assert.ok(
+        (await store.getRun(queued.id)).error.includes('ComfyUI'),
+        'the note should say where the clip would be',
+    );
+    assert.equal((await store.getRun(finished.id)).status, 'completed', 'a settled run is untouched');
+    assert.equal((await store.getRun(cancelled.id)).status, 'cancelled', 'a cancelled run is untouched');
+    assert.equal(await store.reconcileRuns(), 0, 'reconciling again changes nothing');
+});
+
+await checkAsync('a cancelled run survives the waiter failing', async () => {
+    const store = new H3Store(join(root, 'cancel-clobber'), {});
+    await store.init();
+    const run = await store.saveRun({ mode: 't2v', status: 'cancelled', promptId: 'cancel-1', media: [] });
+    const stub = stubFetch({ '/history/cancel-1': {} });
+    try {
+        const studio = createStudio({
+            store,
+            getConfig: () => ({ ...config, baseUrl: 'http://fake-cancel.invalid:8188', pollIntervalMs: 10, comfyuiDirs: [] }),
+            getApiKey: async () => undefined,
+            proxyBase: () => undefined,
+        });
+        // The history never reports this prompt, so the wait times out — which
+        // must not overwrite the terminal state the user asked for.
+        const settled = await studio.waitRun(run, { timeoutMs: 30 });
+        assert.equal(settled.status, 'cancelled');
+    }
+    finally {
+        stub.restore();
+    }
 });
 
 /* ------------------------------------------------------------------ */

@@ -12,7 +12,7 @@ import { mkdir, readdir, stat } from 'node:fs/promises';
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { ComfyUIClient, collectMedia, mediaProxyUrl } from './comfy.js';
 import { buildWorkflow } from './workflows.js';
 import {
@@ -44,9 +44,46 @@ function safeBase(value, fallback) {
     return cleaned === '' ? fallback : cleaned;
 }
 
-/** A compact, sortable timestamp for generated file names. */
-function stamp() {
-    return new Date().toISOString().replace(/[-:]/g, '').replace(/\..+$/, '').replace('T', '-');
+/**
+ * A compact, sortable stamp for generated output names.
+ *
+ * Milliseconds are kept deliberately: at second resolution two runs of the same
+ * operation with the same output name inside one second would resolve to the
+ * same path and the second would silently overwrite the first.
+ */
+export function stamp() {
+    return new Date().toISOString()
+        .replace(/[-:]/g, '')
+        .replace('T', '-')
+        .replace('.', '-')
+        .replace('Z', '');
+}
+
+/**
+ * The local cache file name for one ComfyUI output reference.
+ *
+ * The basename alone is *not* unique: ComfyUI addresses a file by
+ * filename + subfolder + type, so `a/clip.mp4` and `b/clip.mp4` share a
+ * basename and the second download would silently reuse the first one's bytes.
+ * The full identity is hashed so that a faithful-but-long name also cannot be
+ * truncated into a collision by `safeBase`'s length cap.
+ *
+ * Exported for testing.
+ */
+export function cacheNameFor(ref) {
+    const filename = typeof ref?.filename === 'string' ? ref.filename : '';
+    if (filename === '') return '';
+    const subfolder = typeof ref?.subfolder === 'string' ? ref.subfolder.trim() : '';
+    const type = typeof ref?.type === 'string' ? ref.type.trim() : '';
+    const digest = createHash('sha1')
+        .update(`${type}\u0000${subfolder}\u0000${filename}`)
+        .digest('hex')
+        .slice(0, 10);
+    const readable = safeBase(
+        subfolder === '' ? filename : `${subfolder.replace(/[\\/]+/g, '_')}__${filename}`,
+        'clip',
+    ).slice(0, 40);
+    return `${readable}-${digest}`;
 }
 
 /** True when a path stays inside a root. */
@@ -330,6 +367,11 @@ export function createStudio(deps) {
             });
         }
         catch (error) {
+            // A cancel is a terminal outcome the user asked for: do not overwrite
+            // it with the wait's own failure just because the interrupt surfaced
+            // as an error here.
+            const current = await store.getRun(run.id);
+            if (current?.status === 'cancelled' || current?.status === 'interrupted') return current;
             return await store.updateRun(run.id, {
                 status: 'failed',
                 finishedAt: Date.now(),
@@ -430,7 +472,7 @@ export function createStudio(deps) {
             return { path: target, kind: source.kind, name: basename(target), size: info.size };
         }
         // ComfyUI output: cache it locally so FFmpeg has a real file to read.
-        const target = join(store.cacheRoot, safeBase(source.filename, `clip-${Date.now()}`));
+        const target = join(store.cacheRoot, cacheNameFor(source));
         const existing = await stat(target).catch(() => undefined);
         if (existing !== undefined && existing.size > 0) {
             return { path: target, kind: 'comfy', name: basename(target), size: existing.size };
@@ -508,10 +550,21 @@ export function createStudio(deps) {
         });
 
         const startedAt = Date.now();
-        for (const prelude of built.prelude ?? []) {
-            await exec(prelude, mainProbe?.duration);
+        try {
+            for (const prelude of built.prelude ?? []) {
+                await exec(prelude, mainProbe?.duration);
+            }
+            await exec(built.args, mainProbe?.duration);
         }
-        await exec(built.args, mainProbe?.duration);
+        finally {
+            // Scratch files (normalized concat intermediates, palette images, the
+            // drawtext text file) are removed even when the run failed. A
+            // normalized intermediate can be hundreds of megabytes, so leaking
+            // one per failure would quietly fill the disk.
+            for (const file of built.cleanup ?? []) {
+                await store.removeFile(file);
+            }
+        }
         const elapsedMs = Date.now() - startedAt;
 
         const outputInfo = await stat(built.output).catch(() => undefined);
@@ -532,11 +585,7 @@ export function createStudio(deps) {
             command: captured.map((args) => previewCommand(detection.ffmpeg, args)),
         });
 
-        // Temp files: the concat list, the palette, the drawtext text file.
-        for (const file of built.cleanup ?? []) {
-            await store.removeFile(file);
-        }
-
+        // Temp files are removed in the `finally` above, on success and on failure.
         return { render, output: built.output, command: captured.map((args) => previewCommand(detection.ffmpeg, args)) };
     }
 

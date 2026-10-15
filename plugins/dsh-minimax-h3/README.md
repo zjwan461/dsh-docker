@@ -294,11 +294,26 @@ H3 只接受 **4n+1** 帧。插件按官方规则把秒数向上吸附：
 | `maxRuns` | `400` | 保留多少条生成记录 |
 | `maxRenders` | `400` | 保留多少条后期记录 |
 
-### FFmpeg 自动探测顺序
+### FFmpeg 自动探测
 
-`ffmpegPath` → `ffmpeg`（PATH） → `C:\ffmpeg\bin` → WinGet Links → Chocolatey → `D:\ffmpeg\bin` →
-`~/scoop/shims` → `{comfyuiDir}` 下若干位置 → **ComfyUI 便携版里 `imageio_ffmpeg` 自带的 FFmpeg**。
-`h3_assets action: "ffmpeg"` 会列出它试过的每一条路径和失败原因。
+`ffmpegPath`（配置里显式指定）→ `ffmpeg`（PATH）→ 平台自带的常见安装位置 → `{comfyuiDir}` 下若干位置 →
+**ComfyUI 便携版里 `imageio_ffmpeg` 自带的 FFmpeg**。Windows 和 POSIX 走**各自独立的候选表** ——
+不会把对方平台的路径拿来试。
+
+| 平台 | 除 PATH 外还会试 |
+|---|---|
+| Windows | `C:\ffmpeg\bin`、WinGet Links、Chocolatey、`D:\ffmpeg\bin`、`~/scoop/shims` |
+| Linux / macOS | `/usr/bin`、`/usr/local/bin`、`/snap/bin`、`/opt/ffmpeg/bin`、`~/.local/bin`、`~/bin`、`$CONDA_PREFIX/bin` |
+
+`{comfyuiDir}` 下两平台都试 `ffmpeg`、`ffmpeg.exe`、`bin/`、`python_embeded/`、`python_embeded/bin/`。
+`imageio_ffmpeg` 自带的那份按**实际目录形状**发现：Windows 便携版是
+`python_embeded/Lib/site-packages/imageio_ffmpeg/binaries/`，POSIX 是
+`python_embeded/lib/python3.x/site-packages/imageio_ffmpeg/binaries/`，二进制名一个带 `.exe` 一个不带。
+
+`h3_assets action: "ffmpeg"` 会列出试过的每一条路径和**真实失败原因**：`ENOENT` = 不在那儿，
+`EACCES` = 在那儿但没有执行权限 —— Linux 上这两种要处理的事情完全不同。
+`ffprobe` 默认取 FFmpeg 的**同目录兄弟**，按 basename 推导（`/usr/bin/ffmpeg` → `/usr/bin/ffprobe`，
+`ffmpeg.exe` → `ffprobe.exe`），配置里填了 `ffprobePath` 则以配置为准。
 
 ---
 
@@ -331,7 +346,7 @@ for f in lib/*.js; do node --check "$f"; done
 node scripts/smoke.mjs
 ```
 
-`scripts/smoke.mjs` 覆盖 **71 项**，全部不需要 ComfyUI、不需要 FFmpeg、**也不需要任何依赖**
+`scripts/smoke.mjs` 覆盖 **82 项**，全部不需要 ComfyUI、不需要 FFmpeg、**也不需要任何依赖**
 （远程路径用一个假 ComfyUI 打桩，所以 `fetch` 也不出网）：
 
 - 官方 4n+1 规则的取值表（含 JS `%` 与 Python `%` 符号差异这个坑）
@@ -339,13 +354,21 @@ node scripts/smoke.mjs
 - 参数校验（缺提示词、模式不存在、i2v 参考图数量、画幅拼写、宽高成对、越界钳制）
 - 模型清单在"有/无 object_info"两种情况下都不误报
 - **每一个** FFmpeg 操作的 argv（参数类型、无 `undefined`/`NaN`、输出在最后、Windows 路径转义）
+- 跨平台 FFmpeg 探测：`ffprobe` 按 basename 推导（`/usr/bin/ffmpeg` → `/usr/bin/ffprobe` 这个
+  曾经的 Linux bug）、显式路径优先、两平台各自的便携版布局都被探测、平台专属路径**不会**串到对方平台
 - JSON 存储的并发写、容量上限、损坏文件恢复、分镜按 id 合并、设置覆盖层的落盘与损坏回退
+- 重启后把"在飞"的记录收尾成 `interrupted`（否则面板会永远轮询队列），以及取消掉的 run
+  不会被等待器的失败结果覆盖
+- 媒体 Range 语义：多段 / 畸形 / `bytes=` 按 RFC **忽略成 200**（回 416 会打断播放），
+  `bytes=1000-` 这类才回 416；外加一条**故意会崩的**测试 —— 读一个不存在的文件时，
+  裸 `.pipe()` 会因未处理的 `error` 事件杀掉整个宿主进程，现在走 `pipeline` 不会
+- 缓存标识含 subfolder 与 type（同名不同目录不再互相覆盖），输出名带毫秒（同秒不再覆盖）
 - 设置层：覆盖项优先于 `cordis.patch.yml`、`undefined` 不遮蔽基线、未知键与坏值被丢弃并报告
 - 远程形态：认证头/方案的各种组合（含"空 header 名 = 彻底不发"）、从 `/history` 推导输入与产物
   （且不会把结尾像 `.png` 的提示词当成文件名）、服务器答不上来时报告"未知"而非"空"、诊断报告的
   路由前缀 / 端点可用性 / H3 节点存在性
 - `apply()` 在模拟宿主上真实跑一遍：注册 5 个工具、挂载全部路由、错误输入不触网
-- 客户端 bundle 的 id 与包名一致、四个 slot 注册、不 require 未声明的模块
+- 客户端 bundle 的 id 与包名一致、五个 slot 注册、不 require 未声明的模块
 - `package.json` / `cordis.patch.yml` / locale 三者一致
 
 > 这个包**没有任何依赖**，`node scripts/smoke.mjs` 直接就能跑。
