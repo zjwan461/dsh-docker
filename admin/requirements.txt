@@ -1,5 +1,0 @@
-fastapi>=0.110,<1.0
-uvicorn>=0.27,<1.0
-# The panel reads the dsh container's log through the Docker socket with the
-# SDK (never by shelling out to the docker CLI).
-docker>=7.1,<8.0

@@ -1,4 +1,0 @@
--r requirements.txt
-pytest>=8.0
-# fastapi's TestClient needs httpx
-httpx>=0.27
