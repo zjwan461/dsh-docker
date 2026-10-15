@@ -18,7 +18,7 @@
 
 Caddy 已经同时承担了**域名虚拟主机、TLS 终结、反向代理**三件事，再挂一层 nginx 会变成 `nginx(TLS) → caddy(TLS) → dsh`：两个 TLS 终结者、证书要管两处，而浏览器信任的始终只是最外层那一张，纯属多一跳。
 
-- **想用公司 CA 的证书**：不需要 nginx，走下面的 Option B，把证书文件喂给 Caddy 即可。证书由谁签发 ≠ 必须由谁托管。
+- **想用 CA 的证书**：不需要 nginx，走下面的 Option B，把证书文件喂给 Caddy 即可。证书由谁签发 ≠ 必须由谁托管。
 - **只有一种情况值得引入 nginx**：TLS 必须在**集中入口**（已有的 nginx / F5 / LB）终结。那时的正确做法是**把 compose 里的 caddy 服务整个删掉**，让 nginx 直接反代 dsh，而不是两层叠加。届时必须做到五件事：`proxy_set_header Host $host`（nginx 默认是 `$proxy_host`，会导致 /api 信任围栏 403）、`proxy_buffering off`（SSE）、WebSocket upgrade 头、`client_max_body_size` 提到 300m 以上（否则上传 413）、以及明文那一跳只允许走 loopback 或 compose 内网。
 
 ## 为什么是这样设计的（都是对着 `@deepseek-ai/dsh` 的 0.1.5-rc.x / 0.2.0-rc.x 源码核过的）
@@ -203,11 +203,11 @@ openssl x509 -in caddy-root.crt -noout -subject -issuer
 
 导入后打开 `https://dsh.example.com/`，证书颁发者应显示 `Caddy Local Authority` 且不再报警告。
 
-> ⚠️ 这个 CA 只存在于 `caddy-data` 卷里：**删卷（`docker compose down -v`）会重新生成 CA**，所有客户端都要重新信任一次。想长期免维护，就在拿到公司内部 CA 签发的证书后切到 Option B。
+> ⚠️ 这个 CA 只存在于 `caddy-data` 卷里：**删卷（`docker compose down -v`）会重新生成 CA**，所有客户端都要重新信任一次。想长期免维护，就在拿到内部 CA 签发的证书后切到 Option B。
 
 > ℹ️ Caddy 启动日志里的 `installing root certificate ... certificate installed properly in linux trusts` 指的是它把 CA 装进**容器内**的信任库——对宿主机浏览器无效，容器一重建就失效，别被这条日志误导。
 
-### 证书 Option B（公司内部 CA，无警告）
+### 证书 Option B
 
 1. 把证书与私钥放进 `dsh-docker/certs/`，例如 `dsh.example.com.crt` 和 `dsh.example.com.key`
 2. 编辑 `Caddyfile`：注释掉 `tls internal`，取消注释 `tls /certs/...` 那行（文件名要与实际一致）
@@ -514,8 +514,8 @@ docker compose exec dsh dsh plugin --profile web remove <package>
 
 | 现象 | 原因与处理 |
 |---|---|
-| **模型调用失败 / 一直转圈**（走内网 vLLM、LiteLLM 之类的自建端点时） | 头号嫌疑是**公司代理把内网请求也劫持走了**：容器里被注入了 `HTTP_PROXY`，而 `~/.docker/config.json` 的 `noProxy` 只列了 `172.17.0.0/16`、`192.168.*`、`.corp.local`。若端点地址是 `10.x.x.x`，请求就被送到代理 → 失败。对照验证：<br>`docker compose exec -T dsh curl -s -o /dev/null -w '%{http_code}\n' --max-time 8 http://<端点>:端口/v1/models -H "Authorization: Bearer $KEY"`<br>再加 `--noproxy '*'` 跑一次；**两次结果不一致就确认是代理**。修法：把该 host/IP 加进 `noProxy`（顺带补 `172.16.0.0/12`）。<br>次要嫌疑：容器里写 `localhost` 到不了宿主机——用宿主局域网 IP，或给 dsh 服务加 `extra_hosts: ["host.docker.internal:host-gateway"]`。 |
-| 浏览器**没有**「继续访问」按钮 | 受管 Chrome/Edge 的 `SSLErrorOverrideAllowed=false` 策略会彻底禁用跳过证书错误。打开 `chrome://policy` 搜 `SSLErrorOverrideAllowed`：若为 false，点击继续这条路走不通，只能导入 CA（Option A）或改用公司 CA 证书（Option B）。 |
+| **模型调用失败 / 一直转圈**（走内网 vLLM、LiteLLM 之类的自建端点时） | 头号嫌疑是**代理把内网请求也劫持走了**：容器里被注入了 `HTTP_PROXY`，而 `~/.docker/config.json` 的 `noProxy` 只列了 `172.17.0.0/16`、`192.168.*`、`.corp.local`。若端点地址是 `10.x.x.x`，请求就被送到代理 → 失败。对照验证：<br>`docker compose exec -T dsh curl -s -o /dev/null -w '%{http_code}\n' --max-time 8 http://<端点>:端口/v1/models -H "Authorization: Bearer $KEY"`<br>再加 `--noproxy '*'` 跑一次；**两次结果不一致就确认是代理**。修法：把该 host/IP 加进 `noProxy`（顺带补 `172.16.0.0/12`）。<br>次要嫌疑：容器里写 `localhost` 到不了宿主机——用宿主局域网 IP，或给 dsh 服务加 `extra_hosts: ["host.docker.internal:host-gateway"]`。 |
+| 浏览器**没有**「继续访问」按钮 | 受管 Chrome/Edge 的 `SSLErrorOverrideAllowed=false` 策略会彻底禁用跳过证书错误。打开 `chrome://policy` 搜 `SSLErrorOverrideAllowed`：若为 false，点击继续这条路走不通，只能导入 CA（Option A）或改用 CA 证书（Option B）。 |
 | 以前能点击继续，某天突然进不去且没有绕过选项 | HSTS 生效了。浏览器**不会**从证书错误的连接记录 HSTS，所以只要证书一直不受信任，「继续」就一直可用；但一旦导入过 CA（连接变合法），该域名就被写入 HSTS，此后证书再出问题就没有「继续」按钮了。清除方法：Chrome/Edge → `chrome://net-internals/#hsts` → "Delete domain security policies" 输入 `dsh.example.com`；Firefox → 设置里清除该站点数据。 |
 | 浏览器 403 | `DSH_TRUSTED_HOSTS` 与浏览器实际发出的 Host 头不匹配。规则（已核对实现）：**不带端口的条目匹配任意端口，带端口的条目要求完全一致**。所以默认端口场景必须写裸域名 `dsh.example.com`；写成 `:443` 一定 403。另外该条目必须是裸 authority，写成 `https://dsh.example...` 或带路径会让插件加载直接报错。 |
 | 502 / 界面转圈 | ① dsh 容器还没起完，等 `start_period`；② 看日志有没有 `bind overlay verified`，没有就是覆盖层没命中；③ 检查 `Caddyfile` 的 `flush_interval -1` 还在（少了它 SSE 会被缓冲）。 |
