@@ -57,6 +57,34 @@ function comboOptions(objectInfo, classType, inputName) {
 }
 
 /** The aspect-ratio options to offer: the server's own list when it answers. */
+/** The loader node and input name that owns each model slot. */
+export const SLOT_INPUTS = [
+    { slot: 'unet', classType: 'UNETLoader', inputName: 'unet_name' },
+    { slot: 'clip', classType: 'CLIPLoader', inputName: 'clip_name' },
+    { slot: 'vaeVideo', classType: 'VAELoader', inputName: 'vae_name' },
+    { slot: 'vaeAudio', classType: 'VAELoader', inputName: 'vae_name' },
+    { slot: 'lora', classType: 'LoraLoaderModelOnly', inputName: 'lora_name' },
+];
+
+/**
+ * Resolve one requested model file name against the loader's advertised list.
+ *
+ * The defaults are the official templates' bare file names, but a server may
+ * keep the H3 files in a subfolder, and ComfyUI then only accepts the full
+ * relative name (`minimax/xxx.safetensors`). `inventory` suffix-matches, so it
+ * reported such a file as present while generation used the bare name and died
+ * inside the sampler. Preference: exact name, then the shortest suffix match
+ * (the one closest to the models root), then lexicographic for determinism.
+ */
+export function resolveModelName(available, name) {
+    if (!Array.isArray(available) || available.length === 0) return name;
+    if (available.includes(name)) return name;
+    const base = String(name).split(/[\\/]/).pop();
+    const matches = available.filter((candidate) => candidate.endsWith(`/${base}`) || candidate.endsWith(`\\${base}`));
+    if (matches.length === 0) return name;
+    return matches.slice().sort((a, b) => a.length - b.length || (a < b ? -1 : 1))[0];
+}
+
 export function aspectOptions(objectInfo) {
     const live = comboOptions(objectInfo, 'ResolutionSelector', 'aspect_ratio');
     if (live !== undefined && live.length > 0) return live;
@@ -272,6 +300,17 @@ export function resolveOptions(input, config, opts = {}) {
     for (const key of ['unet', 'clip', 'vaeVideo', 'vaeAudio', 'lora']) {
         const value = asString(rawModels[key] ?? raw[key]);
         if (value !== '') models[key] = value;
+    }
+
+    // Resolve every slot against the server's real file list before the graph is
+    // built. A wrong-but-plausible name is the most expensive failure here: it
+    // only surfaces deep inside the sampler, after the model has been queued.
+    const effectiveModels = modelsFor(requestedMode, models);
+    for (const item of SLOT_INPUTS) {
+        models[item.slot] = resolveModelName(
+            loaderFiles(opts.objectInfo, item.classType, item.inputName),
+            effectiveModels[item.slot],
+        );
     }
 
     const refGroup = refGroupFor(opts.objectInfo, requestedMode);

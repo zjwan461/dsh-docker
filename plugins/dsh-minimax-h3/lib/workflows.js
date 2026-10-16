@@ -15,7 +15,7 @@ import { DEFAULT_MODELS, MODES, modelsFor } from './models.js';
 
 /**
  * The duration→frame-count expression the official templates use, verbatim.
- * MiniMax H3 only accepts `4n+1` frame counts (5, 9, 13, …), so a requested
+ * MiniMax H3 only accepts frame counts ≡ 5 (mod 17) (5, 22, 39, …), so a requested
  * duration in seconds is snapped UP to the next legal length at `fps`.
  * Expressed as a graph node (a `ComfyMathExpression`) rather than computed here
  * so the workflow a user opens in ComfyUI shows the same rule.
@@ -33,7 +33,7 @@ export const DEFAULT_FPS = 24;
  */
 const R2V_SCHEDULER_USES_RAW_UNET = true;
 
-/** Snap a frame count to MiniMax H3's legal `4n+1` values (minimum 5). */
+/** Snap a frame count to MiniMax H3's legal ≡ 5 (mod 17) values (minimum 5). */
 export function snapFrames(frames) {
     const n = Math.max(5, Math.round(Number(frames) || 5));
     // The official expression is evaluated by ComfyMathExpression, whose `%` is
@@ -46,7 +46,7 @@ export function snapFrames(frames) {
 /**
  * The frame count a duration in seconds produces, by the official rule.
  *
- * Note that this snaps *up* to the next `4n+1` value, so 5 s at 24 fps is 124
+ * Note that this snaps *up* to the next ≡ 5 (mod 17) value, so 5 s at 24 fps is 124
  * frames (≈5.17 s), not 120 — H3 has no 120-frame option.
  */
 export function framesForDuration(seconds, fps = DEFAULT_FPS) {

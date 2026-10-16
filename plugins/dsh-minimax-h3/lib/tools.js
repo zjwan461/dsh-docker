@@ -62,7 +62,10 @@ function renderGenerate(_args, value) {
  * narrative actions and objects where the panel wants structured metadata, so
  * one renderer covers both.
  */
-function renderText(value) {
+function renderText(_args, value) {
+    // ⚠ 契约是 `render(args, value)`。早先只写了 `renderText(value)`，
+    // 第一个形参接到的是**参数**，于是工具结果里只有参数回显
+    // （实测：`h3_assets action:"ffmpeg"` 返回 `{"action":"ffmpeg"}`）。
     if (typeof value === 'string') return [{ type: 'text', text: value }];
     if (value !== null && typeof value === 'object' && typeof value.text === 'string') {
         return [{ type: 'text', text: value.text }];
@@ -79,7 +82,7 @@ function generateTool(ctx, studio, getConfig) {
             `Modes: ${MODE_HELP}.`,
             't2v needs only a prompt. i2v needs one reference image as the first frame. r2v takes up to 9 reference images that the prompt addresses as <Picture 1>, <Picture 2>, …',
             'Reference images must already live in ComfyUI\'s input directory — put them there first with h3_assets action: "upload" (pass a local file path) and use the returned name in `refs`.',
-            'Durations snap up to H3\'s legal frame counts (4n+1 at 24 fps), so 5s becomes 124 frames (≈5.17s) and 6s becomes 158 (≈6.58s) — the snap adds up to ~0.7s.',
+            'Durations snap up to H3\'s legal frame counts (5 mod 17: 5, 22, 39, …, 124, 158, 243, 362, 481), so 5s becomes 124 frames (≈5.17s) and 6s becomes 158 (≈6.58s) — the snap adds up to ~0.7s.',
             'Turbo (Lightning LoRA) cuts steps from 20 to 8 (r2v: 4) and is much faster with a small quality cost; enable it with turbo: true.',
             'Defaults to mode: "async" — the call returns a job id and the harness notifies this session when the clip is ready. Use mode: "sync" only when you can afford to block.',
         ].join(' '),
@@ -101,7 +104,7 @@ function generateTool(ctx, studio, getConfig) {
                 height: { type: 'number', description: 'Explicit output height; must be paired with width.' },
                 megapixels: { type: 'number', description: `Size budget when aspect is used, ${LIMITS.megapixelsMin}–${LIMITS.megapixelsMax}. Default 0.4 — H3 is trained near this and larger sizes cost a lot of VRAM.` },
                 duration: { type: 'number', description: `Clip length in seconds, ${LIMITS.durationMin}–${LIMITS.durationMax}. Snapped up to a legal frame count. Default 5.` },
-                frames: { type: 'number', description: 'Explicit frame count, bypassing duration. Snapped to the nearest legal 4n+1 value ≥ your input.' },
+                frames: { type: 'number', description: 'Explicit frame count, bypassing duration. Snapped up to the nearest legal frame count ≡ 5 (mod 17) ≥ your input.' },
                 fps: { type: 'number', description: 'Frame rate of the assembled video (default 24). Changing it changes what a duration means.' },
                 seed: { type: 'number', description: 'Noise seed. Omit (or pass -1 / "random") for a fresh random seed every call; pass a number to reproduce a shot.' },
                 turbo: { type: 'boolean', description: 'Enable the Turbo/Lightning LoRA and its distilled step count.' },
@@ -228,7 +231,7 @@ function runsTool(studio) {
             },
             required: [],
         },
-        output: { schema: {}, render: renderText },
+        output: { schema: { type: 'string' }, render: renderText },
         timeoutMs: 120_000,
         async execute(args) {
             const action = typeof args.action === 'string' ? args.action : 'list';
@@ -327,7 +330,7 @@ function assetsTool(studio, getConfig) {
             },
             required: [],
         },
-        output: { schema: {}, render: renderText },
+        output: { schema: { type: 'string' }, render: renderText },
         timeoutMs: 300_000,
         async execute(args) {
             const action = typeof args.action === 'string' ? args.action : 'list';
@@ -441,7 +444,7 @@ function postTool(ctx, studio) {
             required: [],
         },
         output: {
-            schema: {},
+            schema: { type: 'string' },
             render: renderText,
             /** The panel card renders a finished clip from this, not from the text. */
             presentationMeta(_args, value) {
@@ -565,7 +568,7 @@ function projectTool(ctx, studio) {
             },
             required: [],
         },
-        output: { schema: {}, render: renderText },
+        output: { schema: { type: 'string' }, render: renderText },
         timeoutMs: 60_000,
         async execute(args) {
             const action = typeof args.action === 'string' ? args.action : 'list';
