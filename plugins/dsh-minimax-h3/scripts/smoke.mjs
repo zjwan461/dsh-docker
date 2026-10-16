@@ -2,9 +2,11 @@
  * Offline smoke test — no ComfyUI, no FFmpeg binary, no DSH host required.
  *
  * It covers the parts that are pure logic and therefore testable: the official
- * graph rebuild for all three modes, the duration→frame rule, option
- * validation, every FFmpeg op's argv construction, and the JSON store's
- * merge/cap behaviour.
+ * graph rebuild for all three modes, the duration→frame rule (≡ 5 mod 17),
+ * option validation, every FFmpeg op's argv construction, the JSON store's
+ * merge/cap behaviour, and — added after the 2026-10 bug hunt — the *tool
+ * result contract* (render must receive execute's return value, not the args)
+ * plus model-file-name resolution against the server's real file list.
  *
  *   node scripts/smoke.mjs
  *
@@ -16,7 +18,7 @@ import { join } from 'node:path';
 import assert from 'node:assert/strict';
 
 import { buildWorkflow, snapFrames, framesForDuration, DURATION_EXPR } from '../lib/workflows.js';
-import { resolveOptions, aspectOptions, inventory, LIMITS } from '../lib/params.js';
+import { resolveOptions, aspectOptions, inventory, LIMITS, resolveModelName } from '../lib/params.js';
 import { MODE_IDS, MODES } from '../lib/models.js';
 import { POST_OPS, candidatePaths, filterPath, findOp, ffprobeSibling, withDefaults, postOpCatalog } from '../lib/ffmpeg.js';
 import { serveLocal } from '../lib/routes.js';
@@ -56,7 +58,7 @@ async function checkAsync(name, fn) {
 // Shared scratch directory for every section that writes something.
 const root = await mkdtemp(join(tmpdir(), 'dsh-minimax-h3-store-'));
 
-console.log('\nduration → frames (the official 4n+1 rule)');
+console.log('\nduration → frames (the official ≡ 5 mod 17 rule)');
 
 check('snapFrames matches the official expression', () => {
     // Values computed from the official ComfyMathExpression with Python modulo.
@@ -1019,6 +1021,95 @@ await checkAsync('h3_post lists its operations without an FFmpeg binary', async 
     const value = await post.execute({ action: 'list' }, { signal: new AbortController().signal });
     assert.equal(typeof value, 'string');
     for (const op of POST_OPS) assert.ok(value.includes(op.id), `${op.id} is missing from the listing`);
+});
+
+/* ------------------------------------------------------------------ */
+// Added after the 2026-10 bug hunt. These three classes had NO coverage, which
+// is exactly why they shipped broken: every existing assertion passed while the
+// tools echoed their own arguments back and the default model names could not
+// be loaded by ComfyUI.
+console.log('\ntool result contract (render must see execute\'s return value)');
+
+const byName = (name) => hostTools.find((definition) => definition.name === name);
+
+check('every string-output tool renders the returned value, not its args', () => {
+    const ARGS = { action: 'ffmpeg' };          // what the model passed
+    const VALUE = 'REAL RESULT TEXT';           // what execute() returned
+    for (const name of ['h3_runs', 'h3_assets', 'h3_post', 'h3_project']) {
+        const definition = byName(name);
+        assert.ok(definition !== undefined, `${name} was not registered`);
+        assert.deepEqual(definition.output.render(ARGS, VALUE), [{ type: 'text', text: VALUE }],
+            `${name} rendered the args instead of the value (render(args, value) contract)`);
+    }
+    const generate = byName('h3_generate');
+    const text = generate.output.render(ARGS, { status: 'ok', runId: 'r1', promptId: 'p1', media: [] })[0].text;
+    assert.ok(text.includes('run r1'), 'h3_generate no longer renders its own result');
+});
+
+check('string-output tools declare a string schema', () => {
+    for (const name of ['h3_runs', 'h3_assets', 'h3_post', 'h3_project']) {
+        assert.deepEqual(byName(name).output.schema, { type: 'string' },
+            `${name} declares ${JSON.stringify(byName(name).output.schema)}`);
+    }
+});
+
+console.log('\nmodel file names resolve against the server\'s real file list');
+
+check('a bare default name finds the file in a subfolder', () => {
+    const base = 'minimax_h3_fl2va_pruned_int8_convrot.safetensors';
+    assert.equal(resolveModelName([`minimax/${base}`, 'other.safetensors'], base), `minimax/${base}`);
+});
+
+check('an exact hit wins over a subfolder hit, and misses stay untouched', () => {
+    assert.equal(resolveModelName(['a/x.safetensors', 'x.safetensors'], 'x.safetensors'), 'x.safetensors');
+    assert.equal(resolveModelName(['deep/a/x.safetensors', 'x.safetensors'], 'x.safetensors'), 'x.safetensors');
+    assert.equal(resolveModelName([], 'x.safetensors'), 'x.safetensors');
+    assert.equal(resolveModelName(undefined, 'x.safetensors'), 'x.safetensors');
+    assert.equal(resolveModelName(['nope.safetensors'], 'x.safetensors'), 'x.safetensors');
+    assert.equal(resolveModelName(['a/y.safetensors', 'b/y.safetensors'], 'y.safetensors'), 'a/y.safetensors');
+});
+
+check('resolveOptions rewrites all five slots to the server\'s real names', () => {
+    const objectInfo = {
+        UNETLoader: { input: { required: { unet_name: [['minimax/minimax_h3_fl2va_pruned_int8_convrot.safetensors']] } } },
+        CLIPLoader: { input: { required: { clip_name: [['minimax/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors']] } } },
+        VAELoader: { input: { required: { vae_name: [['minimax/minimax_h3_video_vae_int8_convrot.safetensors', 'minimax/minimax_h3_audio_vae_fp32.safetensors']] } } },
+        LoraLoaderModelOnly: { input: { required: { lora_name: [['minimax/minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors']] } } },
+    };
+    const options = resolveOptions({ prompt: 'verify', mode: 'i2v', frames: 124, refs: ['a.png'] }, config, { objectInfo });
+    for (const [slot, name] of Object.entries(options.models)) {
+        assert.ok(String(name).startsWith('minimax/'), `${slot} was left as ${name}`);
+    }
+    assert.equal(options.frames, 124, 'frame snapping changed');
+});
+
+check('without object_info every slot keeps its mode default', () => {
+    const options = resolveOptions({ prompt: 'verify', mode: 't2v' }, config, {});
+    assert.deepEqual(options.models, {
+        unet: 'minimax_h3_fl2va_pruned_int8_convrot.safetensors',
+        clip: 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors',
+        vaeVideo: 'minimax_h3_video_vae_int8_convrot.safetensors',
+        vaeAudio: 'minimax_h3_audio_vae_fp32.safetensors',
+        lora: 'minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors',
+    }, 'resolution without object_info must not invent or drop a slot');
+    assert.equal(options.report.model, 'minimax_h3_fl2va_pruned_int8_convrot.safetensors');
+});
+
+console.log('\ndocs and model-facing strings agree on the frame rule');
+
+await checkAsync('no file still *claims* the rule is 4n+1', async () => {
+    const { readFile } = await import('node:fs/promises');
+    // The corrections quote the wrong rule ("不是 4n+1"); only a bare claim is stale.
+    const stale = /4n\s*\+\s*1/;
+    const refutation = /(不是|not)\s*\.{0,2}\s*4n\s*\+\s*1/gi;
+    for (const rel of ['lib/workflows.js', 'lib/skill.js', 'lib/tools.js', 'README.md']) {
+        const text = await readFile(new URL(`../${rel}`, import.meta.url), 'utf8');
+        assert.equal(stale.test(text.replace(refutation, '')), false, `${rel} still claims the rule is 4n+1`);
+    }
+    for (const rel of ['lib/workflows.js', 'lib/skill.js']) {
+        const text = await readFile(new URL(`../${rel}`, import.meta.url), 'utf8');
+        assert.ok(text.includes('\u2261 5 (mod 17)'), `${rel} does not state the real rule`);
+    }
 });
 
 /* ------------------------------------------------------------------ */
