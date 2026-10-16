@@ -42,7 +42,7 @@ Caddy 已经同时承担了**域名虚拟主机、TLS 终结、反向代理**三
 
 | 文件 | 作用 |
 |---|---|
-| `Dockerfile` | `python:3.11-slim-bookworm`（glibc 基线；选它是因为这是目标主机上已验证过的配置，Python 解释器本身已无其它用途）+ NodeSource Node 22 + 全局 `@deepseek-ai/dsh` + `pnpm` + 常用工具层（见「镜像里预装了什么」）；构建期用 `--dump-config` 自检整个 `web` profile |
+| `Dockerfile` | `python:3.11-slim-bookworm`（glibc 基线；选它不是因为需要 Python，而是因为这是目标主机上已验证过、且能拿到预编译 glibc 原生依赖的配置）+ NodeSource Node 22 + 全局 `@deepseek-ai/dsh` + `pnpm` + 常用工具层（见「镜像里预装了什么」）；构建期用 `--dump-config` 自检整个 `web` profile |
 | `entrypoint.sh` | 预检目录可写性 → 打印沙箱体检结论 → 生成 `--patch` 覆盖层并自检 → exec dsh |
 | `doctor.mjs` | 启动时探测并打印 Landlock runner 的实际可用性 |
 | `compose.yaml` | `dsh`（不发布端口）+ `caddy`（TLS 入口，唯一对外端口）；|
@@ -91,7 +91,11 @@ Caddy 已经同时承担了**域名虚拟主机、TLS 终结、反向代理**三
 | 开关 | 装上什么 | 量级 |
 |---|---|---|
 | `INSTALL_OFFICE=1` | `libreoffice-core/writer/calc/impress` + `pandoc` | **约 500MB 以上** |
-| `INSTALL_PYTHON_DOCS=1` | `python-pptx` `python-docx` `openpyxl` `Pillow` | 约 50MB |
+| `INSTALL_PYTHON_DOCS=1` | 文档生成 `python-pptx` `python-docx` `openpyxl` `Pillow`；数值栈 `numpy` `pandas` `scipy` `matplotlib`；抓取/解析 `requests` `beautifulsoup4` `lxml` `PyYAML` | 约 200–250MB |
+
+`INSTALL_PYTHON_DOCS` 这个名字比内容窄了：这一层早已不只是文档库（当时只有后面 4 个）。参数名保留是为了不和已有的 `.env` / `compose.yaml` 冲突，读作"Python 库"即可。`matplotlib` 走 Agg 后端（`MPLBACKEND=Agg`），画图直接出文件；中文标签靠上一层已装的 `fonts-noto-cjk`，用前选一下字体：`rcParams['font.sans-serif'] = ['Noto Sans CJK SC']`。
+
+没装的是 `scikit-learn`（在 numpy/scipy 之上再加 150MB 左右，技能里没有要训练的模型）和 `markitdown`（会拖进 magika + onnxruntime 做文件类型识别，为了一个 LibreOffice/pandoc 已经覆盖的转换器再翻一倍体积）——真需要时都是一行。
 
 设成 `0` 可以瘦身，但**必须重新构建**（`docker compose build && docker compose up -d`）。
 
@@ -458,7 +462,7 @@ docker compose logs caddy | grep -i -E 'certificate|obtain|error'
 | 3 | 在模型页改一项并保存，宿主上 `git diff data/dsh/settings.yaml` | 看到 UI 的写入落到宿主文件 | `data/dsh` 不是目录挂载，或属主与 `DSH_UID` 不一致（见排障表） |
 | 4 | 让 agent 执行 `touch /etc/probe` | `[sandbox: file access denied under workspace-write mode]` | 出现 `SANDBOX_UNAVAILABLE` ⇒ 该内核没有 Landlock（启动日志里有 doctor 结论） |
 | 5 | `docker compose logs dsh \| grep 'landlock launcher'` | `full (/usr/.../landlock-run)` | `partial` = 内核 Landlock ABI 偏旧（文件效果仍受限，fail-closed）；`cannot locate` = `DSH_GLOBAL_ROOT` 指错目录 |
-| 6 | `docker compose exec dsh soffice --headless --version`；同理试 `ffmpeg -version`、`pdftotext -v`、`python3 -c "import pptx"`、`fc-list \| grep -ci CJK` | 各自输出版本；CJK 字体数为正 | 检查 `.env` 的 `INSTALL_OFFICE` / `INSTALL_PYTHON_DOCS` 是否为 1，然后重建镜像 |
+| 6 | `docker compose exec dsh soffice --headless --version`；同理试 `ffmpeg -version`、`pdftotext -v`、`python3 -c "import pptx, pandas, numpy, matplotlib"`、`fc-list \| grep -ci CJK` | 各自输出版本；CJK 字体数为正 | 检查 `.env` 的 `INSTALL_OFFICE` / `INSTALL_PYTHON_DOCS` 是否为 1，然后重建镜像 |
 | 7 | `docker compose logs dsh \| grep 'built-in skills'` | `none in /opt/dsh-skills (mechanism ready; …)`；放了技能后变成计数 | 打出「机制就绪」即算通过：本镜像不带技能 |
 | 8 | 同时开 443 与明文端口时：`curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:<宿主端口>/` | `401` | `403` = `DSH_HTTP_ALLOWED_RANGES` 挡住了（**从服务器自己发起会被挡，属正常**，见下）；`000`/拒绝连接 = compose 里那行 `:80` 映射还没解开，或 caddy 没重建（明文站点本身现在**默认已定义**，见 Caddyfile 末尾） |
 | 9 | 明文用 `http://<authority>:<宿主端口>/`，HTTPS 用 `https://<authority>/` | 两条路各自可用 | `https://…:<明文端口>` **必然失败**：TLS 打到了明文监听上 |

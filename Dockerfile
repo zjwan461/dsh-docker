@@ -179,15 +179,43 @@ RUN set -eux; \
       echo 'INSTALL_OFFICE=0: LibreOffice and pandoc are NOT in this image'; \
     fi
 
-# ── python libraries for document generation (switchable) ───────────────────
-# The python interpreter arrives with the base image; these are the libraries the
-# document skills need. In particular python-pptx + Pillow are what the bundled
-# pptx workflow drives, and without them the agent has to pip install at run time
-# (which needs egress and is slow).
+# ── python libraries: document generation + the everyday numeric stack ──────
+# The python interpreter arrives with the base image; everything here is what
+# turns it from "present" into a capability the agent reaches for. One single
+# `pip install`, so it is one layer.
 #
-# pandas / matplotlib / markitdown are one line away in the same list when a task
-# calls for them; they are not here by default because they roughly double this
-# layer for nothing.
+# Three groups, and the reason each one is here:
+#
+#   * document generation — python-pptx + Pillow are what the bundled pptx
+#     workflow drives, python-docx / openpyxl cover Word and Excel. Without them
+#     the agent answers "please pip install python-pptx", and pip in here needs
+#     egress and time.
+#   * numeric / data — numpy, pandas, scipy, matplotlib. matplotlib plots to
+#     files with no display (Agg, pinned below), and Chinese labels come out as
+#     text instead of boxes because fonts-noto-cjk is already in the layer above
+#     — it only has to be selected:
+#       rcParams['font.sans-serif'] = ['Noto Sans CJK SC']
+#   * fetch / parse — requests, beautifulsoup4, lxml, PyYAML: the import header
+#     of nearly every script the agent writes.
+#
+# Roughly 200–250 MB unpacked, so it multiplies this layer several times over.
+# Build with --build-arg INSTALL_PYTHON_DOCS=0 (or INSTALL_PYTHON_DOCS=0 in .env)
+# to leave all of it out.
+#
+# The argument keeps its old name on purpose: the list started as document
+# libraries only and existing .env / compose files already set
+# INSTALL_PYTHON_DOCS. Read it as "python libraries", not "python docs".
+#
+# Deliberately still absent: scikit-learn (another ~150 MB on top of
+# numpy/scipy for models no skill trains) and markitdown (drags in magika +
+# onnxruntime for file-type detection — a second doubling for a converter
+# LibreOffice and pandoc already cover). Both are one line away when a task
+# really calls for them.
+#
+# No-op when the layer is off, but declared outside the branch because ENV
+# cannot be conditional: Agg keeps matplotlib from hunting for a backend and
+# rules out a stray Tk import in a container with no display.
+ENV MPLBACKEND=Agg
 ARG INSTALL_PYTHON_DOCS=1
 RUN set -eux; \
     if [ "${INSTALL_PYTHON_DOCS}" = "1" ]; then \
@@ -195,9 +223,20 @@ RUN set -eux; \
         python-pptx \
         python-docx \
         openpyxl \
-        Pillow; \
+        Pillow \
+        numpy \
+        pandas \
+        scipy \
+        matplotlib \
+        requests \
+        beautifulsoup4 \
+        lxml \
+        PyYAML; \
+      python3 -c 'import numpy, pandas, scipy, pptx, docx, openpyxl, PIL, requests, bs4, lxml, yaml; print("python libraries import clean")'; \
+      python3 -c 'import matplotlib; matplotlib.use("Agg"); import matplotlib.pyplot as plt; plt.figure().savefig("/tmp/mpl-smoke.png"); print("matplotlib Agg renders to a file")'; \
+      rm -rf /root/.cache/matplotlib /tmp/mpl-smoke.png; \
     else \
-      echo 'INSTALL_PYTHON_DOCS=0: document-generation libraries are NOT in this image'; \
+      echo 'INSTALL_PYTHON_DOCS=0: document-generation and numeric libraries are NOT in this image'; \
     fi
 
 # ── Node.js 22 ──────────────────────────────────────────────────────────────

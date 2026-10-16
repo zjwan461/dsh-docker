@@ -597,16 +597,18 @@ dsh 各包之间用 `^0.1.5-rc.1` 这类范围互相依赖，而 npm 会解析�
 
 关于字体这一条我想多说一句：这是最容易漏、也最容易在交付时才发现的一环。agent 生成了一份中文 PPT，你用 LibreOffice 转成 PDF 交付——**没有 CJK 字体就是满屏方框**，而排查方向会被误导成"编码问题"。同理 `fonts-noto-color-emoji` 管的是 emoji。
 
-### 8.3 Python 文档能力层（`.env` 开关，默认开）
+### 8.3 Python 库层：文档能力 + 数值栈（`.env` 开关，默认开）
 
 | 开关 | 装上什么 | 体积代价 |
 |---|---|---|
 | `INSTALL_OFFICE=1` | `libreoffice-core/writer/calc/impress` + `pandoc` | 约 500MB 以上 |
-| **`INSTALL_PYTHON_DOCS=1`** | **`python-pptx` `python-docx` `openpyxl` `Pillow`** | 约 50MB |
+| **`INSTALL_PYTHON_DOCS=1`** | **文档：`python-pptx` `python-docx` `openpyxl` `Pillow`；数值：`numpy` `pandas` `scipy` `matplotlib`；抓取/解析：`requests` `beautifulsoup4` `lxml` `PyYAML`** | 约 200–250MB |
 
 **这一层是"功能增强"里性价比最高的一个。** 它做的是：让 agent 用 Python 直接**构造** Office 文档，而不是只能输出 Markdown 让你自己转。
 
 `python-pptx` + `Pillow` 尤其关键——它们正是让 agent 能生成一份带图的 PPT 的那两个库。没有它们，agent 面对"给我做一份幻灯片"只能回一句"请先 `pip install python-pptx`"，而容器里的 `pip install` 要出网、要等，在没有外网的环境里直接无解。
+
+数值栈是同一个道理的另一半：`numpy` + `pandas` 让 agent 能真的**算**（读一个 CSV/Excel 做汇总、透视、清洗），`matplotlib` 让它把算出来的东西**画成图存成文件**。这两个动作在"数据分析"类任务里几乎必然出现，而它们各自对应命令执行前的一次 `pip install`——`matplotlib` 还额外需要后端配置（本镜像用 `ENV MPLBACKEND=Agg` 固定为无显示设备也能出图的那种）。中文标签不用额外装字体：上一层已经装了 `fonts-noto-cjk`，只要在使用时选一下（`rcParams['font.sans-serif'] = ['Noto Sans CJK SC']`）就不会画出一堆方框。
 
 > 这里顺便**更正一个我一开始理解错的地方**。我最初以为"用 Python 镜像只是碰巧拿到了一个验证过的 glibc 基线，Python 解释器本身没用"——**这个理解是错的**。
 >
@@ -614,7 +616,11 @@ dsh 各包之间用 `^0.1.5-rc.1` 这类范围互相依赖，而 npm 会解析�
 >
 > 恰恰相反：**Python 解释器随基线白拿，而这批文档库把"白拿的解释器"变成了 agent 的真实能力。** 所以那一层的意义是"零边际成本地把 Python 变成生产力"。
 
-Dockerfile 注释里还有一句值得抄的思路：`pandas` / `matplotlib` / `markitdown` **一行就能加进同一个列表**，但默认不加，因为"它们会让这一层体积翻倍却换不来什么"。这是一个很克制的取舍——**默认给通用能力，特化能力留给需要的人。**
+这一层后来还**扩容过一次**，原因就是上面那句"一行之遥"：`numpy` / `pandas` / `scipy` / `matplotlib` 加上 `requests` / `beautifulsoup4` / `lxml` / `PyYAML` 现在都在默认清单里，代价是这一层从约 50MB 变成 **约 200–250MB**。
+
+仍然不装的是 `scikit-learn` 和 `markitdown`：前者要在 numpy/scipy 之上再加 150MB 左右，而技能里没有要训练的模型；后者会拖进 magika + onnxruntime 做文件类型识别，等于为一个 LibreOffice / pandoc 已经覆盖的转换器再翻一倍体积。**两者都只差一行**——这就是那个取舍的现行版本：**默认给通用能力，重且特化的留给需要的人。**
+
+顺带记一个容易踩的坑：开关名 `INSTALL_PYTHON_DOCS` 是这一层只有 4 个文档库时留下的，**故意没改名**——已有 `.env` 和 `compose.yaml` 设的都是它，改名等于让老配置静默失效。所以读这个参数时要读成"Python 库"，而不是"只装文档库"。
 
 ### 8.4 LibreOffice 的两个取舍
 
