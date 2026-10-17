@@ -10,7 +10,7 @@
 export const H3_SKILL = {
     name: 'dsh-minimax-h3-video',
     source: 'runtime',
-    description: 'Minimax H3 视频生产：文生视频（t2v）/图生视频（i2v）/参考生视频（r2v）的选择与提示词写法、分镜与跨镜头一致性、时长与合法帧数、Turbo LoRA 取舍、模型清单检查、以及用 h3_post（FFmpeg）做剪辑/合片/字幕/响度/分镜缩略图的配方。需要生成或后期 MiniMax H3 视频时加载。',
+    description: 'Minimax H3 视频生产：t2v/i2v/r2v 的选择与提示词写法、分镜与跨镜头一致性、时长与合法帧数、Turbo LoRA 取舍、模型清单检查，以及用 h3_post（FFmpeg）做剪辑/合片/字幕/响度/分镜缩略图的配方。含实测踩坑：**说话人必须写 (S1)/(S2) 不能写人名**、画外音要明写 Off-screen、没给台词模型会自己编、说了 no cuts 仍会切镜、At 时间戳偏差 0.6–1.5s、ComfyUI LoadImage 缓存导致新静帧不生效，以及生成后必须做的四项验收。需要生成或后期 MiniMax H3 视频时加载。',
     whenToUse: '用户要求生成视频（文生视频、图生视频、参考生视频、AI 短片、分镜、镜头）时；需要检查 MiniMax H3 模型是否就位、解释为什么生成失败或很慢时；需要把多段生成结果剪成一条片子、加旁白/字幕/水印/封面、或做分镜缩略图时；或调用 h3_generate / h3_post / h3_project / h3_runs / h3_assets 之前。',
     content: `# MiniMax H3 视频生产
 
@@ -103,6 +103,64 @@ H3 只接受 **≡ 5 (mod 17)** 的帧数（5、22、39、56、…、124、158�
 - 标签规则：镜头写 [Shot 1]（**不带时间戳**）；说话人写 (S1)(S2)，按实际发声顺序，同一人跨镜头复用编号；
   <Subject N> 可复用主体；<Picture N> 只在参考图当首帧/关键帧时才单列。
 - **别指望模型自己判语种**：冷僻句/文言会被判成外语（TTS 侧实测：不指定语种时“守将羊坎的儿子被押到城下。”整句被念成外语；旁白制作见 dsh-video-narration）。
+
+### 说话人：\`(S1)/(S2)\` 是"谁在说"，不是备注
+
+- **编号决定让画面里的哪个人动嘴。写人名（\`(皇帝)\`、\`(侯景)\`）会被当成普通文字忽略**，
+  于是模型一律让**画面里那个人**发声。典型症状：A 问 B 答，画面上却是 B 自问自答；
+  或画外的人说话时画内的人嘴在动。这是本项目返工最多的一类问题。
+- 正确做法三件事一起做：
+  1. 编号：\`(S1)\` 给画面里的主人物，\`(S2)\` 给次要/画外的人；
+  2. 每句台词前加**自然语言提示**点名谁在说（\`the seated emperor answers him, quietly\`）；
+  3. 画外音**明写**：\`Off-screen, an unseen voice answers him: (S2) <d>[中文] …</d>\`。
+     只写 \`(S2)\` 不写"画外/未见其人"，模型仍会让画内的人开口。
+- **两人同框时，先在 \`[Shot 1]\` 里钉死谁是谁**，并明确写出**谁不说话**——
+  这比只说"谁说话"有效得多：
+
+    [Shot 1] … The seated emperor is (S1). The kneeling general in the near foreground is
+    (S2), and he does not speak at all.
+    [Shot 2] At 00:06.40 the seated emperor answers him, quietly: (S1) <d>[中文] …</d>
+
+### 别让模型即兴说话
+
+动作描述里只要出现 "he speaks …"，而**同一条提示词没有对应 \`<d>\` 台词**，
+H3 就会自己编一句含混的话（实测：一句听不懂的嘟囔，还混进了成片，被误当成"口播有问题"）。
+
+- 需要有人说话 → **一定给 \`<d>\` 台词**；
+- 不需要 → 明确写 \`He does NOT speak at all — his mouth stays closed.\`
+
+### 说"不切"往往不够
+
+H3 很喜欢按台词自动切镜。\`Camera: locked off, no cuts.\` **压不住**——
+实测它会自己切 4 次到主角特写，于是别人问话时画面还是主角的脸。要压住得把话说满：
+
+    ONE single unbroken locked-off take — the camera never moves, never pushes in and there is
+    ABSOLUTELY NO CUT anywhere in this shot, no close-up and no cutaway of any kind. The framing
+    is fixed from the first frame to the last and BOTH men stay fully inside it the whole time.
+
+### \`At MM:SS.mmm\` 只是"希望"，不是"保证"
+
+时间戳能让模型把台词放在大致位置，但**实测偏差 0.6–1.5 秒**（同一镜里 5 句逐句不同）。
+所以：
+
+- **不要用 \`At\` 的时间去排字幕/旁白**。生成后必须**实测**台词落在哪
+  （能量 + 过零率找语音簇），再按实测值对齐字幕与旁白的进出点。
+- 想让旁白和口播不打架，靠的不是 \`At\`，而是**镜长 + 实测 + 校验脚本**（见 dsh-video-narration）。
+
+## 生成后的验收（每条都要过）
+
+生成成功 ≠ 可以进剪辑。这四件事每轮都查，否则问题会在成片里才暴露：
+
+1. **台词有没有真的念出来**：算音频 RMS 与过零率（语音约 0.05–0.25）。全零 = 没念。
+2. **念的人对不对**：把画面切左右两半比较帧间活动量；对白响起时动的那一半才是说话人。
+   或者直接抽帧看嘴。
+3. **有没有偷偷切镜**：逐帧算帧间差，突然的尖峰 = 硬切。\`locked off\` 不等于没切。
+4. **静帧有没有真的喂进去**：取视频第 0 帧与意图静帧比差。
+   ⚠️ ComfyUI 的 \`LoadImage\` **按输入参数缓存**：文件名不变就复用上一张图，**磁盘换了也不生效**。
+   上传时把文件名带上内容哈希（\`C4_1_47f47cdf.png\`），参数一变缓存键就变。
+5. **黑场/静音片段的音轨要和画面等长**：用 \`anullsrc\` + \`-frames:v\` 生成时，
+   视频一到帧数上限整个输出就终止，**音频会被截短**（实测 10.125s 的片子音频只有 7.70s）。
+   画面与静音**分开生成再封装**。
 
 ## Turbo（Lightning LoRA）取舍
 
