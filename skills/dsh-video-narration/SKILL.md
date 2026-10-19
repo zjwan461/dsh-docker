@@ -1,6 +1,6 @@
 ---
 name: dsh-video-narration
-description: 给已经剪好的片子做旁白/配音：TTS 逐句卡点（qwen3-tts-flash）、逐镜响度对齐、闪避混音、响度与真峰值质检。含实测踩坑：**旁白与画内口播叠在一起（必须旁白先说、口播后进，并写成校验脚本）**、TTS 语速只能实测不能按字数估、多行字符串拼接会把旁白截断或复制、环境底音轨必须与画面等长、TTS 判错语种、短音频 loudnorm 失效、volume 是线性倍数、alimiter 的 limit/level 语义、ASR 不能当判据。需要给视频配旁白、混音轨、修响度或判断"要不要配字幕"时加载。
+description: 给已经剪好的片子做旁白/配音。**TTS 默认走非流式 HTTP**（`POST /api/v1/services/audio/tts/SpeechSynthesizer`，一次请求回音频 URL），逐句合成→实测时长→逐句 atempo 卡镜长→逐镜响度对齐→闪避混音→两遍 loudnorm 质检。含实测踩坑：**`[cosyvoice:] Engine error [411]` 是音色 ID 与 model 不配对，不是接口写错**（3.0-tts-plus 只有 longanlufeng/longanlingxin，不带版本后缀）、workspace 前缀不同会 401、WebSocket 走代理要 `proxy_type="http"`、**amix 默认 normalize=1 会把旁白压掉 23dB**、atempo 只能 1.0–1.30 且不要慢放、旁白与画内口播必须错开并写成校验脚本、语速只能实测不能按字数估、环境底音轨必须与画面等长、短音频 loudnorm 失效、volume 是线性倍数、alimiter 语义、ASR 不能当判据。需要给视频配旁白、混音轨、修响度或判断"要不要配字幕"时加载。
 whenToUse: 需要给视频加旁白/解说/配音时；成片响度忽大忽小时；旁白与画面台词打架时；需要把 TTS 生成的语音卡到剪辑点上时；要判断某条合成语音"念得对不对"时。
 metadata:
   version: 1
@@ -22,28 +22,115 @@ metadata:
 | TTS 的**真实时长** | 每条都 `ffprobe` 量 | 同一句话两次生成可差 40%（实测 2.10s / 5.60s 同文本） |
 | 成片**逐镜响度** | 见 §4 | 落差常有 20dB 以上，旁白会一边贴脸一边真空 |
 
-## 2. TTS：qwen3-tts-flash（阿里百炼）
+## 2. TTS 选路：默认走非流式 HTTP
 
-**验证过的调用形状**（原生端点，不是 OpenAI 兼容端点）：
+三条路都验证过，**先别折腾协议，直接走第一条**：
+
+| 路 | 什么时候用 | 代价 |
+|---|---|---|
+| **非流式 HTTP**（默认） | 99% 的情况：整片几十句旁白，离线合成 | 一次 POST 一句，无并发压力 |
+| 流式 WebSocket | 要边生成边播、要打断 | 走代理要改 websocket-client |
+| qwen3-tts-flash 原生 | 手上有百炼 key、想用老音色 | 要显式 `language_type` |
+
+**一句一条**，不要整段一次合成：后面要按镜头长度逐句变速、逐句对齐响度、
+逐句算字幕时长，整段音频这些全做不了。
+
+## 2.1 首选：非流式 HTTP（本轮跑通的那条）
+
+```
+POST https://<workspace>.cn-beijing.maas.aliyuncs.com/api/v1/services/audio/tts/SpeechSynthesizer
+Authorization: Bearer <key>
+
+{"model": "qwen-audio-3.0-tts-plus",
+ "input": {"text": "大唐开国，名将如云。",
+           "voice": "longanlufeng",
+           "format": "wav",
+           "sample_rate": 24000}}
+```
+
+返回 `output.audio.url`（带签名的 OSS 链接），**再 GET 一次**才是音频字节。
+实测 24k / 单声道 / 5 秒中文 ≈ 250KB，延迟 2~4 秒。
+
+### 音色必须和 model 成对
+
+| model | 可用系统音色 |
+|---|---|
+| `qwen-audio-3.0-tts-plus` | `longanlufeng`（男）、`longanlingxin`（女）—— **不带版本后缀** |
+| `qwen-audio-3.1-tts-flash` | `longanhuan_v3.1`、`anmingyuan_v3.1`、`huozhuoshi_v3.1` …（带 `_v3.1`） |
+
+跨用必错。真实案例：拿 `longanhuan_v3.1` 喂给 3.0-plus，返回 411；
+把 `longanlufeng` 喂给 3.1-flash，同样 411。
+
+> **`[cosyvoice:]Engine error [411]: TTS speak operation failed` = 音色 ID 不对，不是接口写错。**
+> 官方音色列表原话：*"An unsupported voice returns an `InvalidParameter` error, such as
+> `[cosyvoice:] Engine error [411]: TTS speak operation failed`."*
+> 这条把人误导了很久——四种请求形状、三种协议、十几种音色名全试一遍，报错一模一样。
+> 查错顺序：**先查音色表，再查代码。**
+
+### 错误码对照（照着这一列查，别猜）
+
+| 报错 | 真正的原因 |
+|---|---|
+| `Model not exist` | model 名不在这个工作区。**注意：路由是对的**，只是没这个模型 |
+| `url error, please check url` | 路径/端点不匹配，或这个网关没接这个服务 |
+| `Request voice is invalid!` | voice 传了空串 |
+| `[cosyvoice:] Engine error [411]` | **音色 ID 与 model 不配对**（最常见） |
+| `InvalidApiKey` | key 和主机不属于同一个工作区（A 的 key 打 B 的主机必然 401） |
+
+### `<workspace>` 前缀是坑
+
+控制台给的常常是 `token-plan.cn-beijing.maas.aliyuncs.com`，
+而官方示例里写的是 `llm-<id>.cn-beijing.maas.aliyuncs.com`——**这是两个不同的工作区**，
+拿 A 的 key 打 B 的主机是 401，跟你 key 对不对无关。
+
+## 2.2 流式 WebSocket（要边生成边播时才用）
+
+`wss://<host>/api-ws/v1/inference` + `dashscope.audio.tts_v2.SpeechSynthesizer(model, voice)`。
+公司代理下**两处都要改**，少一处就是 5 秒超时：
+
+```python
+_orig = websocket.WebSocketApp.run_forever
+def rf(self, *a, **kw):                     # websocket-client 不读 env 里的 http(s)_proxy
+    kw.setdefault("http_proxy_host", HOST)
+    kw.setdefault("http_proxy_port", PORT)
+    kw.setdefault("http_proxy_timeout", 30)
+    kw.setdefault("proxy_type", "http")     # 不加这句报 "Only http, socks4, socks5 …"
+    return _orig(self, *a, **kw)
+websocket.WebSocketApp.run_forever = rf
+```
+
+失败时真实信息在 `synth.last_response['header']['error_message']`，**不在异常里**——
+异常只会给你 `RequestFailure()` 或一个 5 秒超时。
+
+## 2.3 qwen3-tts-flash（有百炼 key 时）
 
 ```
 POST https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation
-{"model":"qwen3-tts-flash",
- "input":{"text":"…","voice":"Ethan"},
+{"model":"qwen3-tts-flash","input":{"text":"…","voice":"Ethan"},
  "parameters":{"format":"wav","language_type":"Chinese"}}
-→ output.audio.url（OSS 签名链接，需再下载）
 ```
 
-- **`language_type: "Chinese"` 必须显式给。** 不给时模型会对冷僻句/文言判错语种：
-  实测"守将羊侃的儿子被押到城下。"整句被念成外语（听起来完全不是中文，ASR 也转成假名）；
-  补上后三条样本全部正常。
-- **兼容端点别用**：`compatible-mode/v1/chat/completions` 对 `voice` 的位置挑剔
-  （放 `audio.voice` 报 "The voice property is required"，放顶层又报 "invalid text"）；
+- **`language_type: "Chinese"` 必须显式给。** 不给时冷僻句/文言会被判成外语：
+  实测"守将羊侃的儿子被押到城下。"整句念成外语，补上后正常。
+- 兼容端点别用：`compatible-mode/v1/chat/completions` 对 `voice` 摆放挑剔，
   `compatible-mode/v1/audio/speech` 直接 404。
-- 音色：`Ethan`（男，稳）、`Cherry`（女）、`Rocky`（最慢最沉，最像纪录片）等十余个。
-  注意有些名字是**同一音色**（实测 `Ethan` 与 `Marcus` 输出同长同内容）。
-- `speech_rate` 有效（0.8 实测约慢 15%），**但生成波动远大于它**——
-  想卡点就多取几条留最短，再 `atempo`（保音高）微调，不要指望速率参数。
+- 音色：`Ethan`（男，稳）、`Cherry`（女）、`Rocky`（最慢最沉，最像纪录片）。
+  有些名字是同一音色（`Ethan` 与 `Marcus` 输出同长同内容）。
+
+## 2.4 脚本
+
+`scripts/tts.py` 把上面三条都包了，默认走非流式 HTTP：
+
+```bash
+export TTS_BASE=https://<workspace>.cn-beijing.maas.aliyuncs.com
+export TTS_API_KEY=sk-…
+
+python3 tts.py --probe                       # 先确认哪个音色能出声
+python3 tts.py --text "…" --out vo/S01.wav
+python3 tts.py --batch shots.json --outdir vo   # 批 + 输出 durations.json（含建议 tempo）
+```
+
+`--probe` 这一步别省：**音色不通就换音色，不要改代码。**
 
 ## 2.5 语速只能实测，不能按字数估
 
@@ -65,6 +152,33 @@ vo="第一句。"
 丢失导致下文的"他信佛"没有指代；F1 的旁白被改成两句重复）。
 
 **改这类字段就整条重写**，改完再**逐镜打印全文**核对一遍。
+
+## 2.7 逐句变速卡进镜头（比改文案便宜）
+
+镜头长度是固定的（H3 的帧数网格），旁白长度是浮动的，两者必然对不上。
+**不要为了凑时长去改文案**，先算每一句需要多少变速：
+
+    slot   = frames / 24
+    target = slot - 0.30                      # 留 0.2~0.3s 气息
+    tempo  = vo_dur / target                  # clamp 到 [1.0, 1.30]
+
+- **上限 1.30**：超过就说明这句文案对不上这个镜长，改文案或换更长的镜（H3 帧数 124→141→158）。
+- **下限 1.0，不要慢放**：tempo < 1 会把语音拉得发黏。宁可让它自然念完、后面留静默——
+  黑屏/静场镜头尤其需要那点静默。
+- `atempo` 保音高；实测本项目 16 句落在 1.02–1.23，人耳无感。
+
+> 顺带：中文 TTS 实测 **4.2–5.4 字/秒**，同一句两次生成能差 40%。
+> 所以"多少字 = 多少秒"这个换算只可用于估镜长下限，排时间线必须用 ffprobe 实测值。
+
+## 2.8 `amix` 默认会把旁白压掉 23dB
+
+拼旁白轨（多路 adelay + amix）时，**`amix` 默认 `normalize=1`，按输入路数做除法**：
+14 路 → −22.9dB。症状是旁白轨测出来 −43 LUFS，而每一句单独测都是 −16。
+
+    [a0][a1]…amix=inputs=14:duration=longest:dropout_transition=0:normalize=0[out]
+
+同理，旁白与底音的最终混音也要 `normalize=0`，否则人声再被砍一半。
+对齐后的期望值：旁白 −16 LUFS、整条轨 RMS 约 −20dB；如果测出来 −40 左右，先查这一条。
 
 ## 3. 逐句卡点
 
@@ -158,7 +272,7 @@ vo="第一句。"
 
 | 脚本 | 作用 |
 |---|---|
-| `tts.py` | 逐句 TTS（原生端点、强制中文、量时长） |
+| `tts.py` | 逐句 TTS。**默认非流式 HTTP**（`--route http`），也支持 `--route dashscope`（qwen3-tts-flash）。`--probe` 逐个试音色，`--batch` 批量出 wav + `durations.json`（含建议 `tempo`）。 |
 | `vad.py` | 纯 Python 定位"哪一秒在说话"（给旁白找空隙） |
 | `asr.py` | 粗筛用转写（**不可作判据**，文件头已标注） |
 | `mix_vo.py` | 逐镜响度对齐 + 闪避 + 两遍 loudnorm 的完整混音（含踩坑注释） |

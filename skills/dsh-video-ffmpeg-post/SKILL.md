@@ -1,6 +1,6 @@
 ---
 name: dsh-video-ffmpeg-post
-description: 用 FFmpeg 把多段生成结果做成能交付的片子：合片、统一调色、烧中日文字幕、两遍响度标准化、竖屏/画幅转换、分镜对照表与静帧总览图。含实测踩坑：**-c copy 拼 AAC 会产出无法解码的音轨导致画内口播全部消失**、loudnorm 会升采样到 96kHz、alimiter 门限要按素材重标、libass 丢弃空边距事件、volume 是线性倍数、AAC 真峰值过冲、竖屏裁切会切掉横屏烧的字、f-string 提前求值、输出路径相对 cwd。要把 AI 生成的片段剪成成片或做交付版式时加载。
+description: 用 FFmpeg 把多段生成结果做成能交付的片子：合片、统一调色、烧中日文字幕、两遍响度标准化、竖屏/画幅转换、分镜对照表与静帧总览图。含实测踩坑：**时间基不一致时 concat 解复用器会悄悄重复帧（83 秒变 109 秒）——改用 filter 级 concat**、**纯黑卡用 -frames:v 会截断音轨（5.17s 画面配 2.24s 音频）**、**SRT + force_style 的字号边距不可控，要精确控制就写带 PlayRes 的 ASS**、一个 filtergraph 串两个 subtitles= 会失败（合并成一个 ASS）、字幕行宽 ≤11 字（1080 宽 / 62px）、竖屏用 scale=-2:1920+crop 而不是 pad、-c copy 拼 AAC 会产出无法解码的音轨、loudnorm 升采样到 96kHz、alimiter 门限要按素材重标、libass 丢弃空边距事件、volume 是线性倍数、AAC 真峰值过冲、竖屏裁切会切掉横屏烧的字、f-string 提前求值、输出路径相对 cwd。要把 AI 生成的片段剪成成片或做交付版式时加载。
 whenToUse: 需要把多段视频合片时；要烧字幕/章节卡/数字卡时；成片响度不统一时；要做竖屏或改画幅时；要做分镜缩略图、静帧总览图、封面抽帧时；FFmpeg 滤镜参数行为与预期不符时。
 metadata:
   version: 1
@@ -19,6 +19,28 @@ ffmpeg -y -f concat -safe 0 -i list.txt -c copy -movflags +faststart film_raw.mp
 - **逐镜时长以 `ffprobe` 的实测值为准**排时间线；容器时长与内容时长会差几十毫秒，
   累到十几镜就是零点几秒的漂移（本轮 100.494 vs 100.461）。
 - 字幕/字幕卡的入点全部**从实测偏移算**，不要手写时间码。
+
+### ⚠️ 时间基不一致时，concat 解复用器会**悄悄重复帧**
+
+`-f concat -safe 0 -i list.txt` 是拼接最省事的写法，但它**沿用了各段自己的时间基**。
+只要有一段的 timebase 跟别的不一样（典型的：用 lavfi `color=` 生成的纯黑卡，timebase 1/24；
+H3 出的是 1/12288），后面的帧就会被 `fps` 滤镜补出来，**总时长凭空变长而且没人报错**：
+
+> 真实案例：16 段本该 83.4 秒，出来 **108.9 秒**——多出来的 25 秒全是重复帧。
+> 而每一段的单独 `ffprobe` 都是对的（5.167s），所以查错时看不出问题。
+
+判断：`ffprobe` 各段时长之和 ≈ 83.6，但成片 108.9 → 就是这一条。
+
+**解法：用 filter 级 concat**，时间戳由滤镜重算，绝对确定：
+
+```
+ffmpeg -i a.mp4 -i b.mp4 -i c.mp4 \
+  -filter_complex "[0:v][0:a][1:v][1:a][2:v][2:a]concat=n=3:v=1:a=1[cv][ca];[cv]fps=24,…[v]" \
+  -map "[v]" -map "[ca]" out.mp4
+```
+
+段数多（十几段）也没问题，一次调用就够。顺带说：filter concat 对**分辨率/帧率不一致**的输入
+也比解复用器宽容。
 
 ### ⚠️ 音轨绝对不能跟着 `-c copy` 一起拼（本项目最贵的一个坑）
 
@@ -54,6 +76,26 @@ ffmpeg -y -v error -f concat -safe 0 -i parts.txt -t {total} -ac 2 -ar 48000 -c:
 ```
 -vf "setpts=N/24/TB,<其它滤镜>" -fps_mode passthrough -r 24
 ```
+
+## 1.5 纯黑卡 / 静音段：音轨会被截短
+
+用 lavfi 造一张黑卡当片头，最自然的写法是
+
+    ffmpeg -f lavfi -i color=black:s=768x1344:r=24 -f lavfi -i anullsrc=r=48000:cl=stereo \
+           -frames:v 124 -t 5.1667 … out.mp4
+
+结果是**画面 124 帧（5.167s），音轨只有 2.24s**——`-frames:v` 一到上限整个输出就结束，
+音频被截断。单独 `ffprobe` 能看出来，混在一起就看不出来了。
+
+正确做法：**分开造，再 mux**。
+
+```
+ffmpeg -f lavfi -i color=black:s=768x1344:r=24 -frames:v 124 -c:v libx264 … /tmp/v.mp4
+ffmpeg -f lavfi -i anullsrc=r=48000:cl=stereo -t 5.1667 -c:a aac … /tmp/a.m4a
+ffmpeg -i /tmp/v.mp4 -i /tmp/a.m4a -c copy -shortest out.mp4
+```
+
+验：`ffprobe -show_entries stream=codec_type,duration` 两条要**对得上**。
 
 ## 2. 统一调色
 
@@ -95,6 +137,18 @@ drawtext=fontfile='/usr/share/fonts/opentype/noto/NotoSerifCJK-Bold.ttc':
 4. **双语拆成两条事件** → libass 的自动避让会把中英配错行（英文跑到别人的中文上面）。
    要**并入同一条事件**，行内用 `\fs` 缩小、`\c` 变暗，中英永远成块。
 5. 按 `「」` 断句时先**保护引号内的整段**再切，否则会在引号中间断开。
+6. **SRT + `force_style` 的缩放不可控。** 同样写 `Fontsize=19`、`MarginV=210`，
+   在 1080×1920 上可能渲染成**一米大的字贴在天灵盖**（实测整块跑到画面 1/4 高度）。
+   libass 会拿 SRT 没有 PlayRes 的默认值去缩放，字号和边距都不是像素概念。
+   **要精确控制就写 ASS**：带上
+
+       [Script Info]
+       PlayResX: 1080
+       PlayResY: 1920
+
+   之后 `Fontsize=62` 就是 62 个像素、`MarginV=400` 就是从底往上 400 像素，所见即所得。
+7. **一个 filtergraph 里串两个 `subtitles=` 会失败**（标题层 + 字幕层这么写，报 filter 配置错误）。
+   把两层的 Dialogue 事件**合并进同一个 .ass**，只留一个 `subtitles=`。
 
 ## 4. 响度与峰值
 
@@ -121,12 +175,39 @@ drawtext=fontfile='/usr/share/fonts/opentype/noto/NotoSerifCJK-Bold.ttc':
   人物/章节卡用**黑体**（Noto Sans CJK）并更大一号。实测可用值：人物卡人名 52px、身份行 32px。
 - 字体只用系统里**真实存在**的：先 `fc-list :lang=zh` 看。写了不存在的字体名，libass 会静默回退。
 
+## 4.8 字幕行宽：先算能放几个字
+
+1080 宽的字幕区，去掉左右 margin 之后大约 940px。中文字宽 ≈ 字号，所以
+
+    每行字数 ≈ 940 / 字号
+
+`Fontsize=62` → **最多 15 字，实际按 ≤11 字排**（留出标点与抗锯齿余量）。
+`Fontsize=78` → 只能放 12 字。写成 16 字一行会直接顶出画面两侧。
+
+所以断句要先按"每行 ≤11 字"来切，**允许一行字幕拆成上下两行**（`\\N`），
+不要为了"一句话一条"把行撑爆。实测 14 镜 72 秒，两行制比单行制少一半的翻页次数，读起来更稳。
+
 ## 5. 画幅与竖屏
 
 - 竖屏裁切：`crop=414:736:433:0,scale=1080:1920:flags=lanczos`（中心安全区）。
 - ⚠️ **横屏烧好的字幕在竖屏裁切里会被切掉左右**（本轮实测："公元548年冬天"被切了头）。
   两种正解：先在竖屏画布上 `pad` 再加字；或者给竖屏做**独立分镜版**而不是裁一刀。
 - 精确 16:9：H3 侧输出常是 1280×736（1.739:1），交付前 `crop=1280:720:0:8` 再 `scale`。
+### 竖屏原生生成 → 1080×1920：`scale=-2:1920` + `crop`，别 `pad`
+
+H3 竖屏原生出的是 **768×1344（0.5714）**，目标 9:16 是 0.5625，两者差 1.6%。
+两种收法：
+
+| 写法 | 结果 |
+|---|---|
+| `scale=1080:-2,pad=1080:1920` | 缩到 1080×1890，**上下各 15px 黑边** |
+| `scale=-2:1920,crop=1080:1920` | 缩到 1097×1920，**左右各裁 8px**，无黑边 |
+
+后者更好：8px 的裁切肉眼不可见，而 15px 的黑边在纯黑镜头的边上会被看出来
+（画面抖动时黑边跟着跳）。除非你**故意**要留边，否则不要 pad。
+
+顺带：竖屏原生生成比"横屏拍完中心裁一刀"清晰得多——768 宽裁出来的 432 宽再放大到 1080，
+是 2.5 倍上采样，手机上能看出糊。**主发哪个平台，就用那个画幅原生生成。**
 
 ## 6. 对照表与总览图
 

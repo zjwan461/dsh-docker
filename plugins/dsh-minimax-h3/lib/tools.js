@@ -152,7 +152,7 @@ function generateTool(ctx, studio, getConfig) {
 
             const finish = async (signal) => {
                 const settled = await studio.waitRun(run, { signal, timeoutMs });
-                return {
+                return jsonSafe({
                     kind: 'sync',
                     runId: settled.id,
                     promptId,
@@ -162,7 +162,7 @@ function generateTool(ctx, studio, getConfig) {
                     elapsedMs: settled.elapsedMs,
                     media: settled.media ?? [],
                     error: settled.error,
-                };
+                });
             };
 
             if (runMode === 'sync') {
@@ -174,42 +174,53 @@ function generateTool(ctx, studio, getConfig) {
                 // rather than failing a generation the server already accepted.
                 return await finish(exec.signal);
             }
-            const jobId = jobs.start({
-                kind: 'h3',
-                label: `MiniMax H3 ${run.modeLabel}${run.title !== '' ? ` · ${run.title}` : ''}`,
-                ...(exec.agent !== undefined ? { owner: exec.agent } : {}),
-                run: (job) => {
-                    job.append(`run ${run.id} · prompt ${run.promptId}\n${run.summary}\n`);
-                    const done = (async () => {
-                        const settled = await studio.waitRun(run, { timeoutMs });
-                        if (settled.status !== 'completed') {
-                            return { status: 'failed', detail: 'minimax-h3', output: settled.error ?? 'generation failed' };
-                        }
-                        job.append(`completed in ${((settled.elapsedMs ?? 0) / 1000).toFixed(1)}s\n`);
-                        for (const item of settled.media ?? []) job.append(`${item.kind}: ${item.url}\n`);
+            let background;
+            try {
+                background = { id: jobs.start({
+                    kind: 'h3',
+                    label: `MiniMax H3 ${run.modeLabel}${run.title !== '' ? ` · ${run.title}` : ''}`,
+                    // jobs.start() resolves the owner through the agent registry by SESSION ID;
+                    // passing the agent object itself throws `session "[object Object]" has no live agent`.
+                    ...(exec.agent?.id !== undefined ? { owner: exec.agent.id } : {}),
+                    run: (job) => {
+                        job.append(`run ${run.id} · prompt ${run.promptId}\n${run.summary}\n`);
+                        const done = (async () => {
+                            const settled = await studio.waitRun(run, { timeoutMs });
+                            if (settled.status !== 'completed') {
+                                return { status: 'failed', detail: 'minimax-h3', output: settled.error ?? 'generation failed' };
+                            }
+                            job.append(`completed in ${((settled.elapsedMs ?? 0) / 1000).toFixed(1)}s\n`);
+                            for (const item of settled.media ?? []) job.append(`${item.kind}: ${item.url}\n`);
+                            return {
+                                status: 'completed',
+                                output: JSON.stringify({
+                                    kind: 'sync',
+                                    runId: settled.id,
+                                    promptId,
+                                    status: settled.status,
+                                    mode: settled.mode,
+                                    summary: settled.summary,
+                                    elapsedMs: settled.elapsedMs,
+                                    media: settled.media ?? [],
+                                }),
+                            };
+                        })();
                         return {
-                            status: 'completed',
-                            output: JSON.stringify({
-                                kind: 'sync',
-                                runId: settled.id,
-                                promptId,
-                                status: settled.status,
-                                mode: settled.mode,
-                                summary: settled.summary,
-                                elapsedMs: settled.elapsedMs,
-                                media: settled.media ?? [],
-                            }),
+                            cancel: () => {
+                                void studio.cancel({ promptId, runId: run.id }).catch(() => undefined);
+                            },
+                            done,
                         };
-                    })();
-                    return {
-                        cancel: () => {
-                            void studio.cancel({ promptId, runId: run.id }).catch(() => undefined);
-                        },
-                        done,
-                    };
-                },
-            });
-            return { kind: 'background', jobId, promptId, runId: run.id };
+                    },
+                }) };
+            } catch (error) {
+                // No job controller serves this agent, the owner is not live, or the
+                // per-owner job limit is hit. The prompt is already queued on ComfyUI,
+                // so block instead of failing a call that is going to finish anyway.
+                ctx.logger?.warn?.(`minimax-h3: background job unavailable (${error instanceof Error ? error.message : String(error)}); falling back to a blocking wait`);
+                return await finish(exec.signal);
+            }
+            return { kind: 'background', jobId: background.id, promptId, runId: run.id };
         },
     };
 }
@@ -621,6 +632,28 @@ function projectTool(ctx, studio) {
 }
 
 /** Register every tool on the plugin's fiber and return the disposers. */
+/**
+ * Strip anything that is not lossless JSON (undefined, NaN, Infinity, class
+ * instances). A tool result carrying one of those is rejected outright by the
+ * session format ("value is not lossless JSON"), which turns a finished
+ * generation into a failed tool call.
+ */
+function jsonSafe(value) {
+    if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
+    if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+    if (Array.isArray(value)) return value.map(jsonSafe);
+    if (typeof value === 'object') {
+        const out = {};
+        for (const [k, v] of Object.entries(value)) {
+            if (v === undefined) continue;
+            const safe = jsonSafe(v);
+            if (safe !== undefined) out[k] = safe;
+        }
+        return out;
+    }
+    return undefined; // functions, symbols, bigint
+}
+
 export function registerH3Tools(ctx, studio, getConfig) {
     const definitions = [
         generateTool(ctx, studio, getConfig),

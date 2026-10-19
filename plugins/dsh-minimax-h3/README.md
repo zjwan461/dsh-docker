@@ -340,6 +340,42 @@ h3_generate prompt: "…"  duration: 5  vae_tile: 512   # 0（默认）= 一次�
 
 ---
 
+## 排障：工具报了奇怪的错
+
+### `session "[object Object]" has no live agent (background job owner must be live)`
+
+`h3_generate` 的 async 路径要调用 `jobs.start({ owner })`，而 `jobs` 服务是按**会话 ID 字符串**
+去 agent 注册表里查 owner 的。旧版本把 `exec.agent`（对象）直接传了进去，查不到就抛这个错。
+
+已修正为 `owner: exec.agent.id`。同时在 `jobs.start` 外面加了 try/catch：**任务已经提交给 ComfyUI 之后**，
+任何"后台任务不可用"的失败（没有 job 控制器、owner 不活跃、单 owner 并发上限）都会降级成**阻塞等待**，
+而不是把一个注定会跑完的生成判成失败。
+
+### `tool returned invalid output: value is not lossless JSON`
+
+工具返回值里只要有一个 `undefined` / `NaN` / `Infinity`，宿主写会话事件时就整条拒收。
+生成其实成功了，但调用被判失败。现在返回前统一过一遍 `jsonSafe()`，非有限数值转 `null`、`undefined` 直接丢掉。
+
+### 两种都失败时：直接打 ComfyUI
+
+插件的工具只是 `/prompt` 的封装。真要绕开（或者做批量脚本），照下面的节点链自己拼图就行：
+
+    UNETLoader(minimax_h3_fl2va_*.safetensors)
+      → [LoraLoaderModelOnly(minimax_h3_fl2v_turbo_*)] → MiniMaxH3SigmaShift
+      → KSampler(positive/negative, latent_image)
+    CLIPLoader(qwen3vl_32b_* , type="minimax") → CLIPTextEncode(negative)
+    MiniMaxH3ImageToVideo(clip, vae, prompt, width, height, length, first_frame?)
+      → CONDITIONING + LATENT
+    KSampler → VAEDecode(video vae) + VAEDecodeAudio(audio vae)
+    → CreateVideo(fps=24, audio) → SaveVideo(format="mp4", codec="auto")
+
+要点：
+
+- 端点用 `/prompt`、`/history/<id>`、`/view?filename=…`、`/upload/image`（multipart）。
+  **注意有些构建的端点名是下划线式**（`/system_stats`、`/object_info`），驼峰式会 404。
+- 参考图先用 `/upload/image` 推进 input，名字里**带上内容哈希**——`LoadImage` 按输入参数缓存，同名换图不生效。
+- 帧数必须 ≡ 5 (mod 17)；`length` 不在网格上会被节点自己向上吸附。
+
 ## 工作原理与设计取舍
 
 - **三个模板是逐节点移植的**，不重新发明图。官方怎么做，这里就怎么做——包括 `r2v` 模板里

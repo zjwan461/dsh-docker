@@ -1,165 +1,243 @@
 #!/usr/bin/env python3
-"""旁白/台词 TTS（阿里百炼 qwen3-tts-flash，key 从 .secrets/dashscope.key 读）。
+"""旁白 TTS：一句话一条 wav，并给出"卡进镜头"建议的变速值。
 
-为什么用**原生**接口而不是 OpenAI 兼容接口：兼容接口对 `voice` 的摆放位置挑剔
-（放 `audio.voice` 报 "The voice property is required"，放顶层又报 "invalid text"），
-实测只有原生 `multimodal-generation/generation` 一次就通：
-    POST /api/v1/services/aigc/multimodal-generation/generation
-    {"model":"qwen3-tts-flash","input":{"text":…,"voice":…},"parameters":{"format":"wav"}}
-返回 `output.audio.url`（OSS 链接，带签名有效期）。
+两条路，默认走第一条（2026-10 实测最省事的一条）：
+
+  A. 非流式 HTTP（推荐）
+     POST https://<workspace>.cn-beijing.maas.aliyuncs.com
+          /api/v1/services/audio/tts/SpeechSynthesizer
+     {"model":"qwen-audio-3.0-tts-plus",
+      "input":{"text":"…","voice":"longanlufeng","format":"wav","sample_rate":24000}}
+     → output.audio.url（再 GET 下载）
+
+     优点：一次请求直接拿音频，不需要 websocket、不需要管代理、
+           不需要在"流式边界"上拼音频。整片几十句也只是几十次 POST。
+
+  B. 原生 qwen3-tts-flash（有百炼 key 时可用）
+     POST https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation
+     — 必须显式给 parameters.language_type="Chinese"，否则冷僻句/文言会被判成外语。
+
+⚠️ 最重要的一个坑：`[cosyvoice:]Engine error [411]: TTS speak operation failed`
+   不是接口写错，是**音色 ID 和 model 不配对**。qwen-audio-3.0-tts-plus 只有两个系统音色：
+     longanlufeng（男）  longanlingxin（女）      —— 都不带版本后缀
+   带 `_v3.1` / `_v3.6` 的是 qwen-audio-3.1-tts-flash 那批，喂给 3.0-plus 一样 411。
 
 用法：
-  python3 tts.py --text "…" --out out/vo/S2.wav [--voice Cherry] [--model …]
-  python3 tts.py --probe-voices          # 试哪些音色可用
-  python3 tts.py --narration             # 按登记表把 8 句旁白全试一遍并核时间
+  python3 tts.py --text "大唐开国，名将如云。" --out vo/S01.wav
+  python3 tts.py --probe                        # 逐个试音色，看哪个能出声
+  python3 tts.py --batch shots.json --outdir vo # 批量；输出 durations.json 含建议 tempo
+
+keys（按优先级）：TTS_API_KEY → TTS_KEY_FILE → ~/.dsh/secrets/tts.key
+base  ：TTS_BASE（默认取 TTS_BASE 环境变量，没有就报错，让你显式填一次）
 """
 import argparse
 import json
 import os
 import subprocess
 import sys
+import urllib.error
 import urllib.request
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-def read_key() -> str:
-    """密钥来源（按优先级）：DASHSCOPE_API_KEY 环境变量 →
-    DASHSCOPE_KEY_FILE 指定的文件 → ~/.dsh/secrets/dashscope.key。"""
-    env = os.environ.get("DASHSCOPE_API_KEY", "").strip()
-    if env:
-        return env
-    path = Path(os.environ.get("DASHSCOPE_KEY_FILE",
-                               Path.home() / ".dsh" / "secrets" / "dashscope.key"))
-    return path.read_text().strip()
-URL = "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"
-FPS = 24
+DEFAULT_MODEL = "qwen-audio-3.0-tts-plus"
+DEFAULT_VOICE = "longanlufeng"
 
-# 旁白终稿（脚本 §3，已按 2026-10-15 的决定改两处）+ 它在成片里的可用时间窗
-# (镜, 文本, 窗口起点, 窗口终点)  —— 窗口已扣掉镜头自身的进出淡入
-#   S7  改短：原句自带角色原话，会与 H3 已念出的台词重复 → 只念前半句，原话交给角色
-#   S11 改短：32 字念 7.28s，与本镜"最后两秒全静"冲突 → 只念前两行数字
-NARRATION = [
-    ("S2",   "公元548年冬天。一个人带着八千兵渡过了长江。", 0.6, 7.3),
-    ("S3",   "史书上有另一个数字：一千。无论哪个，都少得不像话。", 0.6, 7.3),
-    ("S4",   "他叫侯景。北方边镇出身。右脚短，骑马射箭都不是他的长处。", 0.4, 7.5),
-    ("S5",   "他向皇帝求娶王、谢家的女儿。", 0.6, 3.4),
-    ("S7",   "守将羊侃的儿子被押到城下。", 0.0, 2.6),   # 角色的第一个字实测 2.96s 才起
-    ("S9",   "他被关了起来，还照常斋戒、洗手、漱口。病久了，嘴里发苦，要蜂蜜，要不到。", 0.4, 7.75),
-    ("S10a", "三年后，侯景兵败。船上陪着他的，是羊侃的第三个儿子。", 0.6, 6.4),
-    # S11 改回**四句全读**（用户 2026-10-15 追加）：改用与屏幕四行数字近乎逐字对应的紧句，
-    # 32 字 ≈ 5.9s，能塞进 1.2–7.6s；原措辞 44 字要 8.1s，只能靠加长镜头（192f→226f）。
-    ("S11",  "八千人渡过长江。一百二十天当了皇帝。十多万人困在台城。两三千人活到城破。", 1.2, 7.6),
-]
-
-# 后配补录：S9 镜尾那声「荷，荷」（ASR 证明 H3 那一镜没念出可辨认的语音）
-# 用「贺」字强制读 hè hè（荷/贺 同音 hè）；**字幕仍写「荷，荷」**。
-TAILS = {
-    "S9": ("贺贺。", 8.0),
+# 系统音色表（model → [(voice_id, 说明)]）。来自官方音色列表，换了 model 一定要重查。
+VOICES = {
+    "qwen-audio-3.0-tts-plus": [
+        ("longanlufeng", "男声，明亮爽朗，适合解说/纪录片"),
+        ("longanlingxin", "女声，温暖有共情"),
+    ],
+    "qwen-audio-3.1-tts-flash": [
+        ("longanhuan_v3.1", "女声，多语种/方言"),
+        ("longanlingxin_v3.1", "女声"),
+        ("anmingyuan_v3.1", "男声，清晰自然，旁白/广告"),
+        ("huozhuoshi_v3.1", "男声，清晰，旁白"),
+        ("xunanchuan_v3.1", "男声"),
+        ("longsanshu_v3.1", "男声，沉稳有质感，有声书"),
+    ],
 }
 
-CANDIDATES = ["Cherry", "Ethan", "Serena", "Chelsie", "Dylan", "Ryan", "Peter",
-              "Rocky", "Eric", "Li", "Marcus", "Roy", "Sunny", "Kiki", "Elias"]
+ERROR_HINTS = {
+    "Model not exist": "model 名在这个工作区不存在 —— 换 model，或换到有它的主机",
+    "url error": "路径/端点不对，或这个网关根本没接这个服务 —— 先确认前缀（token-plan / llm-xxxx）",
+    "Request voice is invalid!": "voice 传了空串",
+    "[cosyvoice:]Engine error [411]": "音色 ID 与 model 不配对（最常见）",
+    "InvalidApiKey": "key 和主机不属于同一个工作区 —— A 的 key 打 B 的主机必然 401",
+}
 
 
-def synth(text, out: Path, model="qwen3-tts-flash", voice="Cherry", fmt="wav", rate=None,
-          language="Chinese"):
-    """language_type 必须显式给中文。
+def read_key() -> str:
+    env = os.environ.get("TTS_API_KEY", "").strip()
+    if env:
+        return env
+    path = Path(os.environ.get("TTS_KEY_FILE", Path.home() / ".dsh" / "secrets" / "tts.key"))
+    if path.exists():
+        return path.read_text().strip()
+    raise SystemExit("没有可用的 TTS key：设 TTS_API_KEY 或写 ~/.dsh/secrets/tts.key")
 
-    ⚠️ 踩过的坑（用户听出来的）：不写 `language_type` 时，模型会对某些句子**判错语种**——
-    "守将羊侃的儿子被押到城下。" 整句被念成日语/含混外语（听起来完全不是中文，
-    ASR 也转成假名）。加上 `language_type: "Chinese"` 后，同一句立刻正常
-    （实测三条都转成"守将羊侃的儿子被押到城下"）。**所以这里默认强制中文。**
-    """
-    key = read_key()
-    params = {"format": fmt, "language_type": language}
-    if rate:
-        params["speech_rate"] = rate
-    body = json.dumps({
-        "model": model,
-        "input": {"text": text, "voice": voice},
-        "parameters": params,
-    }).encode()
-    req = urllib.request.Request(URL, data=body, headers={
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {key}",
-    })
-    with urllib.request.urlopen(req, timeout=300) as r:
-        d = json.loads(r.read().decode("utf-8", "replace"))
-    if d.get("code"):
-        raise RuntimeError(f"{d.get('code')}: {d.get('message')}")
-    audio = (d.get("output") or {}).get("audio") or {}
-    url = audio.get("url")
-    if not url:
-        raise RuntimeError("响应里没有音频: " + json.dumps(d, ensure_ascii=False)[:300])
+
+def read_base() -> str:
+    base = os.environ.get("TTS_BASE", "").strip().rstrip("/")
+    if not base:
+        raise SystemExit(
+            "没有 TTS_BASE。填控制台给你的工作区域名，例如\n"
+            "  export TTS_BASE=https://<workspace>.cn-beijing.maas.aliyuncs.com"
+        )
+    return base
+
+
+def _explain(body: str) -> str:
+    for needle, hint in ERROR_HINTS.items():
+        if needle in body:
+            return hint
+    return ""
+
+
+def synth_http(text, out: Path, *, base, key, model=DEFAULT_MODEL, voice=DEFAULT_VOICE,
+               fmt="wav", sample_rate=24000, timeout=120):
+    """非流式 HTTP：一次 POST 拿到 output.audio.url，再 GET 下载。"""
+    url = f"{base}/api/v1/services/audio/tts/SpeechSynthesizer"
+    payload = {"model": model,
+               "input": {"text": text, "voice": voice, "format": fmt, "sample_rate": sample_rate}}
+    req = urllib.request.Request(url, data=json.dumps(payload).encode(), method="POST")
+    req.add_header("Authorization", f"Bearer {key}")
+    req.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            body = json.loads(r.read().decode())
+    except urllib.error.HTTPError as e:
+        raw = e.read().decode(errors="replace")
+        return {"error": raw[:400], "hint": _explain(raw), "status": e.code}
+    audio_url = (body.get("output") or {}).get("audio", {}).get("url")
+    if not audio_url:
+        return {"error": json.dumps(body, ensure_ascii=False)[:400], "hint": ""}
+    with urllib.request.urlopen(audio_url, timeout=timeout) as r:
+        data = r.read()
     out.parent.mkdir(parents=True, exist_ok=True)
-    with urllib.request.urlopen(url, timeout=300) as r:
-        out.write_bytes(r.read())
-    dur = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration",
-                          "-of", "csv=p=0", str(out)], capture_output=True, text=True)
-    return out, float(dur.stdout.strip() or 0), d.get("usage", {})
+    out.write_bytes(data)
+    return {"file": str(out), "bytes": len(data), "dur": duration(out)}
+
+
+def synth_dashscope(text, out: Path, *, key, model="qwen3-tts-flash", voice="Cherry",
+                    fmt="wav", timeout=120):
+    """原生百炼端点。language_type 必须显式给，否则冷僻句会被判成外语。"""
+    url = "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"
+    payload = {"model": model,
+               "input": {"text": text, "voice": voice},
+               "parameters": {"format": fmt, "language_type": "Chinese"}}
+    req = urllib.request.Request(url, data=json.dumps(payload).encode(), method="POST")
+    req.add_header("Authorization", f"Bearer {key}")
+    req.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            body = json.loads(r.read().decode())
+    except urllib.error.HTTPError as e:
+        raw = e.read().decode(errors="replace")
+        return {"error": raw[:400], "hint": _explain(raw), "status": e.code}
+    audio_url = (body.get("output") or {}).get("audio", {}).get("url")
+    if not audio_url:
+        return {"error": json.dumps(body, ensure_ascii=False)[:400], "hint": ""}
+    with urllib.request.urlopen(audio_url, timeout=timeout) as r:
+        data = r.read()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_bytes(data)
+    return {"file": str(out), "bytes": len(data), "dur": duration(out)}
+
+
+def synth(text, out, *, route="http", **kw):
+    if route == "dashscope":
+        return synth_dashscope(text, Path(out), **kw)
+    return synth_http(text, Path(out), **kw)
+
+
+def duration(path) -> float:
+    out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                          "-of", "csv=p=0", str(path)], capture_output=True, text=True).stdout.strip()
+    return round(float(out), 3) if out else 0.0
+
+
+def tempo_for(vo_dur: float, slot: float, pad: float = 0.30) -> float:
+    """为了让这句念完正好收在镜头切点前，需要多少倍速。
+
+    clamp 到 [1.0, 1.30]：
+      - 超过 1.30 → 文案配不上这个镜长，改文案或换更长的帧数（124/141/158）。
+      - 低于 1.0 → **不要慢放**，让语音自然念完、后面留静默。
+    """
+    target = max(slot - pad, 0.5)
+    return round(min(max(vo_dur / target, 1.0), 1.30), 3)
 
 
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--text")
     p.add_argument("--out")
-    p.add_argument("--model", default="qwen3-tts-flash")
-    p.add_argument("--voice", default="Cherry")
-    p.add_argument("--rate", type=float, default=None,
-                   help="speech_rate，>1 更快、<1 更慢（实测有效：0.8→3.85 汉字/秒）")
-    p.add_argument("--probe-voices", action="store_true")
-    p.add_argument("--narration", action="store_true")
+    p.add_argument("--batch", help="JSON: {id: text} 或 [{id, narration, frames}]")
+    p.add_argument("--outdir", default="vo")
+    p.add_argument("--fps", type=float, default=24.0)
+    p.add_argument("--model", default=DEFAULT_MODEL)
+    p.add_argument("--voice", default=DEFAULT_VOICE)
+    p.add_argument("--route", choices=["http", "dashscope"], default="http")
+    p.add_argument("--probe", action="store_true", help="逐个试 VOICES 里的音色")
     a = p.parse_args()
 
-    if a.probe_voices:
-        for v in CANDIDATES:
-            try:
-                f, dur, _ = synth("你好。", ROOT / "out" / "vo" / f"_probe_{v}.wav", a.model, v)
-                print(f"  {v:<9} OK  {dur:.2f}s")
-            except Exception as e:
-                print(f"  {v:<9} ✗   {str(e)[:90]}")
-        return 0
+    key = read_key()
+    if a.route == "http":
+        base = read_base()
 
-    if a.narration:
-        d = ROOT / "out" / "vo"
+    if a.probe:
+        voices = VOICES.get(a.model, [(a.voice, "")])
+        for vid, note in voices:
+            kw = {"key": key, "model": a.model, "voice": vid}
+            if a.route == "http":
+                kw["base"] = base
+            r = synth("测试一二。", Path("/tmp/_probe.wav"), route=a.route, **kw)
+            print(f"{vid:24s} {'OK ' + str(r.get('dur')) + 's' if 'dur' in r else 'ERR ' + r.get('hint', r.get('error', ''))[:60]}  {note}")
+        return
+
+    if a.batch:
+        items = json.loads(Path(a.batch).read_text(encoding="utf-8"))
+        if isinstance(items, dict):
+            items = [{"id": k, "narration": v} for k, v in items.items()]
         rows = []
-        for sid, text, a0, b0 in NARRATION:
-            try:
-                f, dur, usage = synth(text, d / f"{sid}.wav", a.model, a.voice, rate=a.rate)
-                rows.append((sid, text, a0, b0, dur, usage.get("characters")))
-            except Exception as e:
-                print(f"  {sid}: ✗ {str(e)[:120]}")
-        for sid, (text, at) in TAILS.items():
-            try:
-                f, dur, _ = synth(text, d / f"{sid}_tail.wav", a.model, a.voice, rate=a.rate)
-                print(f"  {sid} 镜尾补录「{text}」→ {f.name} {dur:.2f}s（放在镜内 {at}s）")
-            except Exception as e:
-                print(f"  {sid} 补录: ✗ {str(e)[:120]}")
-        print(f"\n{'镜':5s} {'字':>3s} {'窗口':>6s} {'实测':>6s} {'语速':>7s} {'余量':>7s}  判定")
-        tot_chars = tot_dur = 0
-        for sid, text, a0, b0, dur, ch in rows:
-            win = b0 - a0
-            n = len(text)
-            rate = n / dur if dur else 0
-            slack = win - dur
-            verdict = "✓" if slack > 0.3 else ("⚠️ 偏紧" if slack > 0 else "❌ 装不下")
-            tot_chars += n
-            tot_dur += dur
-            print(f"{sid:5s} {n:>3d} {win:>6.2f} {dur:>6.2f} {rate:>6.2f}字/s {slack:>+7.2f}  {verdict}")
-        if tot_dur:
-            print(f"\n旁白合计 {tot_chars} 字 / 实测念完 {tot_dur:.2f}s → 平均 {tot_chars/tot_dur:.2f} 字/秒"
-                  f"（脚本假设 3.1，pacing.py 假设 4.2）")
-        return 0
+        for it in items:
+            sid, text = it["id"], it.get("narration") or it.get("text", "")
+            if not text:
+                continue
+            out = Path(a.outdir) / f"{sid}.wav"
+            kw = {"key": key, "model": a.model, "voice": a.voice}
+            if a.route == "http":
+                kw["base"] = base
+            r = synth(text, out, route=a.route, **kw)
+            if "dur" not in r:
+                print(f"{sid} ERR {r.get('hint') or r.get('error')}", flush=True)
+                continue
+            row = {"id": sid, "dur": r["dur"], "chars": len(text)}
+            if it.get("frames"):
+                row["slot"] = round(it["frames"] / a.fps, 3)
+                row["tempo"] = tempo_for(r["dur"], row["slot"])
+            rows.append(row)
+            print(f"{sid} {r['dur']:5.2f}s {len(text):2d}字 {len(text)/r['dur']:4.2f}字/s"
+                  + (f"  tempo={row['tempo']:.2f}" if "tempo" in row else ""), flush=True)
+        out_json = Path(a.outdir) / "_durations.json"
+        out_json.write_text(json.dumps(rows, ensure_ascii=False, indent=1), encoding="utf-8")
+        total = sum(x["dur"] for x in rows)
+        print(f"\n合计 {total:.2f}s → {out_json}")
+        over = [x for x in rows if x.get("tempo", 1) >= 1.30]
+        if over:
+            print("⚠️ 这些句子超出镜长、变速到上限仍不够，改文案或换更长的帧数：")
+            for x in over:
+                print(f"   {x['id']}  vo={x['dur']}s slot={x['slot']}s")
+        return
 
-    if not a.text or not a.out:
-        print(__doc__)
-        return 1
-    f, dur, usage = synth(a.text, Path(a.out), model=a.model, voice=a.voice)
-    chars = len(a.text)
-    print(f"{f}  {dur:.2f}s  {chars} 字  {chars/dur:.2f} 字/秒  "
-          f"(model={a.model} voice={a.voice} 计费 {usage.get('characters')} 字)")
-    return 0
+    if not (a.text and a.out):
+        p.error("要么 --text/--out，要么 --batch，要么 --probe")
+    kw = {"key": key, "model": a.model, "voice": a.voice}
+    if a.route == "http":
+        kw["base"] = base
+    r = synth(a.text, Path(a.out), route=a.route, **kw)
+    print(json.dumps(r, ensure_ascii=False))
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()
