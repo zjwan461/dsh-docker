@@ -39,6 +39,9 @@ export const LIMITS = {
     refsMax: 9,
     sizeMin: 64,
     sizeMax: 4096,
+    /** VAE decode tile edge, in pixels. 0 = one-shot decode (H3's native 0.4 MP). */
+    vaeTileMin: 64,
+    vaeTileMax: 2048,
 };
 
 /** A random seed — RandomNoise takes an integer and H3 is happy with any.
@@ -178,6 +181,31 @@ export function refGroupsOf(objectInfo, mode) {
     return [...groups];
 }
 
+/**
+ * The input name a first/last-frame node uses for its *final* frame.
+ *
+ * H3's unet is an FL2VA model (first frame + last frame → video + audio), but
+ * the official templates only wire `first_frame`; whether the node exposes a
+ * last-frame input depends on the ComfyUI build on the server. So the name is
+ * read from `/object_info` rather than guessed: exact official spellings first,
+ * then a loose `last/end + frame/image` match. Returns `undefined` when the
+ * node is advertised and declares no such input (the caller must then refuse
+ * instead of queueing a prompt that dies in validation).
+ */
+export function lastFrameInputFor(objectInfo, mode) {
+    if (objectInfo === undefined) return 'last_frame';
+    const spec = objectInfo[MODES[mode]?.node ?? ''];
+    if (spec === undefined) return 'last_frame';
+    const keys = [
+        ...Object.keys(spec.input?.required ?? {}),
+        ...Object.keys(spec.input?.optional ?? {}),
+    ];
+    for (const name of ['last_frame', 'end_frame', 'last_image', 'end_image', 'last_frame_image']) {
+        if (keys.includes(name)) return name;
+    }
+    return keys.find((name) => /(last|end)[_.]?(frame|image)/i.test(name));
+}
+
 function clamp(value, min, max) {
     return Math.min(max, Math.max(min, value));
 }
@@ -313,6 +341,30 @@ export function resolveOptions(input, config, opts = {}) {
         );
     }
 
+    // First/last-frame generation: the plugin's i2v graph can wire a final
+    // frame, but only if this server's node declares one. Refuse early rather
+    // than queue a prompt that fails ComfyUI validation after the model loads.
+    const lastFrame = asString(raw.last_frame) || asString(raw.lastFrame);
+    const lastFrameInput = lastFrame === '' ? undefined : lastFrameInputFor(opts.objectInfo, requestedMode);
+    if (lastFrame !== '') {
+        if (requestedMode !== 'i2v') {
+            throw new Error(`last_frame is only available in i2v (the first/last-frame mode) — ${requestedMode} has no frame input`);
+        }
+        if (lastFrameInput === undefined) {
+            throw new Error(`this server's ${MODES[requestedMode].node} declares no last-frame input, so i2v can only condition the first frame. Use the official first/last-frame (FL2V) template in ComfyUI for that shot, or drop last_frame.`);
+        }
+    }
+
+    // Tiled VAE decode: the 8 GB recipe. Opt-in, because one-shot decode is
+    // both faster and seam-free on cards that can hold the whole latent.
+    const vaeTile = clamp(Math.round(asNumber(raw.vae_tile) ?? asNumber(raw.vaeTile) ?? 0), 0, LIMITS.vaeTileMax);
+    if (vaeTile > 0 && vaeTile < LIMITS.vaeTileMin) {
+        throw new Error(`vae_tile must be 0 (off) or at least ${LIMITS.vaeTileMin} pixels`);
+    }
+    if (vaeTile > 0 && opts.objectInfo !== undefined && opts.objectInfo.VAEDecodeTiled === undefined) {
+        throw new Error('vae_tile needs the VAEDecodeTiled node, which this ComfyUI does not advertise. Update ComfyUI or leave vae_tile at 0.');
+    }
+
     const refGroup = refGroupFor(opts.objectInfo, requestedMode);
     const fpsUsed = fps;
     const effectiveFrames = frames ?? framesForDuration(duration, fpsUsed);
@@ -336,6 +388,9 @@ export function resolveOptions(input, config, opts = {}) {
         refGroup: refGroup.group,
         refPrefix: refGroup.prefix,
         refImageSize: asString(raw.ref_image_size) || 'match',
+        lastFrame,
+        lastFrameInput,
+        vaeTile,
         filenamePrefix: asString(raw.filename_prefix) || asString(raw.filenamePrefix) || 'video/MiniMax_H3',
         title: asString(raw.title) || asString(raw.note) || '',
         projectId: asString(raw.projectId) || asString(raw.project_id) || '',
@@ -350,6 +405,7 @@ export function resolveOptions(input, config, opts = {}) {
                 : `${resolvedAspect} @ ${megapixels}MP`,
             model: models.unet ?? DEFAULT_MODELS[requestedMode].unet,
             lora: turbo ? (models.lora ?? DEFAULT_MODELS[requestedMode].lora) : null,
+            vaeTile: vaeTile > 0 ? vaeTile : 0,
         },
     };
 }
@@ -363,6 +419,8 @@ export function summarizeOptions(options) {
         `seed ${options.seed}`,
     ];
     if (options.turbo) parts.push('Turbo LoRA');
+    if (Number(options.vaeTile) > 0) parts.push(`VAE tile ${options.vaeTile}`);
+    if (typeof options.lastFrame === 'string' && options.lastFrame !== '') parts.push('first+last frame');
     if (options.refs.length > 0) parts.push(`${options.refs.length} ref${options.refs.length > 1 ? 's' : ''}`);
     return parts.join(' · ');
 }

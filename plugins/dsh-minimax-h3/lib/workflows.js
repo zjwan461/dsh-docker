@@ -71,6 +71,8 @@ export function cloneGraph(graph) {
  * @param opts.width / opts.height - explicit size; replaces the selector's outputs.
  * @param opts.duration - seconds, written into the PrimitiveFloat duration node.
  * @param opts.frames - explicit length; bypasses the duration node entirely.
+ * @param opts.lastFrame / opts.lastFrameInput - i2v final frame and its input name.
+ * @param opts.vaeTile - tile edge for VAEDecodeTiled; 0 keeps one-shot VAEDecode.
  * @param opts.fps - CreateVideo frame rate.
  * @param opts.filenamePrefix - SaveVideo filename prefix.
  * @param opts.models - per-slot model file overrides.
@@ -176,11 +178,27 @@ export function buildWorkflow(opts) {
             },
             _meta: { title: '自定义采样器（高级）' },
         },
-        decode_video: {
-            class_type: 'VAEDecode',
-            inputs: { samples: ['advanced', 0], vae: ['vae_video', 0] },
-            _meta: { title: 'VAE 解码（视频）' },
-        },
+        // One-shot decode is the official wiring. `vaeTile > 0` switches to the
+        // tiled decoder, which is what makes 480p on an 8 GB card survive: the
+        // whole video latent does not have to fit in VRAM at once.
+        decode_video: opts.vaeTile > 0
+            ? {
+                class_type: 'VAEDecodeTiled',
+                inputs: {
+                    samples: ['advanced', 0],
+                    vae: ['vae_video', 0],
+                    tile_size: Math.round(opts.vaeTile),
+                    overlap: 64,
+                    temporal_size: 64,
+                    temporal_overlap: 8,
+                },
+                _meta: { title: 'VAE 分块解码（视频）' },
+            }
+            : {
+                class_type: 'VAEDecode',
+                inputs: { samples: ['advanced', 0], vae: ['vae_video', 0] },
+                _meta: { title: 'VAE 解码（视频）' },
+            },
         decode_audio: {
             class_type: 'VAEDecodeAudio',
             inputs: { samples: ['advanced', 0], vae: ['vae_audio', 0] },
@@ -292,6 +310,16 @@ export function buildWorkflow(opts) {
             _meta: { title: '首帧图' },
         };
         h3Inputs.first_frame = ['first_frame', 0];
+        // Optional final frame (FL2V): the model interpolates the middle. The
+        // input name comes from object_info because only some builds expose it.
+        if (typeof opts.lastFrame === 'string' && opts.lastFrame !== '') {
+            nodes.last_frame = {
+                class_type: 'LoadImage',
+                inputs: { image: opts.lastFrame },
+                _meta: { title: '尾帧图' },
+            };
+            h3Inputs[opts.lastFrameInput ?? 'last_frame'] = ['last_frame', 0];
+        }
     }
     nodes[h3] = {
         class_type: 'MiniMaxH3ImageToVideo',

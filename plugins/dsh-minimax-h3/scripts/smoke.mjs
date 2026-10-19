@@ -281,6 +281,69 @@ check('duration and steps are clamped, not rejected', () => {
     assert.equal(resolveOptions({ prompt: 'hi', steps: 9999 }, config, {}).steps, LIMITS.stepsMax);
 });
 
+check('vae_tile switches the video decoder to VAEDecodeTiled', () => {
+    const plain = buildWorkflow({ ...base, mode: 't2v' });
+    assert.equal(plain.decode_video.class_type, 'VAEDecode', 'the default must stay one-shot');
+    const tiled = buildWorkflow({ ...base, mode: 't2v', vaeTile: 512 });
+    assert.equal(tiled.decode_video.class_type, 'VAEDecodeTiled');
+    assert.equal(tiled.decode_video.inputs.tile_size, 512);
+    assert.equal(tiled.decode_video.inputs.temporal_size, 64);
+    assert.deepEqual(tiled.decode_video.inputs.samples, ['advanced', 0]);
+});
+
+check('last_frame adds a second LoadImage wired into the H3 node', () => {
+    const graph = buildWorkflow({ ...base, mode: 'i2v', refs: ['a.png'], lastFrame: 'b.png', lastFrameInput: 'last_frame' });
+    assert.equal(graph.last_frame.inputs.image, 'b.png');
+    assert.deepEqual(graph.h3.inputs.last_frame, ['last_frame', 0]);
+    assert.deepEqual(graph.h3.inputs.first_frame, ['first_frame', 0]);
+    const noEnd = buildWorkflow({ ...base, mode: 'i2v', refs: ['a.png'] });
+    assert.equal(noEnd.last_frame, undefined, 'no last frame must not create the node');
+});
+
+check('last_frame is rejected outside i2v', () => {
+    assert.throws(
+        () => resolveOptions({ prompt: 'hi', mode: 't2v', last_frame: 'b.png' }, config, {}),
+        /only available in i2v/,
+    );
+});
+
+check('last_frame is refused when the server node declares no such input', () => {
+    const objectInfo = {
+        MiniMaxH3ImageToVideo: {
+            input: { required: { prompt: ['STRING', {}], first_frame: ['IMAGE', {}] } },
+        },
+    };
+    assert.throws(
+        () => resolveOptions({ prompt: 'hi', mode: 'i2v', refs: ['a.png'], last_frame: 'b.png' }, config, { objectInfo }),
+        /declares no last-frame input/,
+    );
+    assert.equal(resolveOptions({ prompt: 'hi', mode: 'i2v', refs: ['a.png'] }, config, { objectInfo }).lastFrame, '');
+});
+
+check('a declared last-frame input name is used verbatim', () => {
+    const objectInfo = {
+        MiniMaxH3ImageToVideo: {
+            input: {
+                required: { prompt: ['STRING', {}], first_frame: ['IMAGE', {}] },
+                optional: { end_image: ['IMAGE', {}] },
+            },
+        },
+        VAEDecodeTiled: { input: { required: {} } },
+    };
+    const options = resolveOptions({ prompt: 'hi', mode: 'i2v', refs: ['a.png'], last_frame: 'b.png' }, config, { objectInfo });
+    assert.equal(options.lastFrameInput, 'end_image');
+    const graph = buildWorkflow(options);
+    assert.deepEqual(graph.h3.inputs.end_image, ['last_frame', 0]);
+});
+
+check('vae_tile is refused when the server has no VAEDecodeTiled', () => {
+    assert.throws(
+        () => resolveOptions({ prompt: 'hi', vae_tile: 512 }, config, { objectInfo: {} }),
+        /VAEDecodeTiled/,
+    );
+    assert.throws(() => resolveOptions({ prompt: 'hi', vae_tile: 16 }, config, {}), /at least 64/);
+});
+
 check('inventory reports unknown rather than missing without object_info', () => {
     const report = inventory(undefined, 't2v');
     assert.equal(report.checked, false);

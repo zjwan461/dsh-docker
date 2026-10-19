@@ -80,10 +80,11 @@ function generateTool(ctx, studio, getConfig) {
         description: [
             'Generate a video with MiniMax H3 on the configured ComfyUI server.',
             `Modes: ${MODE_HELP}.`,
-            't2v needs only a prompt. i2v needs one reference image as the first frame. r2v takes up to 9 reference images that the prompt addresses as <Picture 1>, <Picture 2>, …',
+            't2v needs only a prompt. i2v needs one reference image as the first frame (optionally a last_frame too, if the server node declares one, to interpolate the middle). r2v takes up to 9 reference images that the prompt addresses as <Picture 1>, <Picture 2>, …',
             'Reference images must already live in ComfyUI\'s input directory — put them there first with h3_assets action: "upload" (pass a local file path) and use the returned name in `refs`.',
             'Durations snap up to H3\'s legal frame counts (5 mod 17: 5, 22, 39, …, 124, 158, 243, 362, 481), so 5s becomes 124 frames (≈5.17s) and 6s becomes 158 (≈6.58s) — the snap adds up to ~0.7s.',
             'Turbo (Lightning LoRA) cuts steps from 20 to 8 (r2v: 4) and is much faster with a small quality cost; enable it with turbo: true.',
+            'VRAM: set vae_tile (~512) on 8 GB cards — one-shot VAE decode is the usual out-of-memory point. Use 864×480 (0.4 MP) or 640×360 and 3–5 s there; 15 s wants 16 GB.',
             'Defaults to mode: "async" — the call returns a job id and the harness notifies this session when the clip is ready. Use mode: "sync" only when you can afford to block.',
         ].join(' '),
         parameters: {
@@ -94,6 +95,7 @@ function generateTool(ctx, studio, getConfig) {
                     description: 'The prompt. For r2v refer to reference images as <Picture 1>, <Picture 2>, … For i2v describe the motion starting from the given frame. Shot lists, camera moves and audio directions in the prompt all land (e.g. "CUT 1: … CUT 2: …", "Audio: …").',
                 },
                 mode: { type: 'string', enum: MODE_IDS, default: 't2v', description: 't2v text→video; i2v image→video (exactly one ref, the first frame); r2v reference→video (1–9 refs).' },
+                last_frame: { type: 'string', description: 'i2v only: a second image used as the final frame (first-last-frame conditioning), as a ComfyUI input name from h3_assets upload. Requires the server node to declare a last-frame input; otherwise the call fails with an explanation.' },
                 refs: {
                     type: 'array',
                     items: { type: 'string' },
@@ -108,6 +110,7 @@ function generateTool(ctx, studio, getConfig) {
                 fps: { type: 'number', description: 'Frame rate of the assembled video (default 24). Changing it changes what a duration means.' },
                 seed: { type: 'number', description: 'Noise seed. Omit (or pass -1 / "random") for a fresh random seed every call; pass a number to reproduce a shot.' },
                 turbo: { type: 'boolean', description: 'Enable the Turbo/Lightning LoRA and its distilled step count.' },
+                vae_tile: { type: 'number', description: 'Tile edge in pixels for VAEDecodeTiled (e.g. 512); 0 or omitted = one-shot decode. Use on 8 GB / low-VRAM cards, where the video VAE decode is what runs out of memory.' },
                 steps: { type: 'number', description: 'Override the sampler step count (otherwise 20 full / 8 turbo, or 4 for r2v turbo).' },
                 filename_prefix: { type: 'string', description: 'ComfyUI SaveVideo filename prefix, e.g. "film/shot03".' },
                 title: { type: 'string', description: 'A label for this clip in the run history and shot board.' },
