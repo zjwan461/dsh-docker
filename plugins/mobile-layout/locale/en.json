@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Mobile Layout",
+    "description": "Adapts the Harness Web UI to phones: the sidebar becomes a drawer, the conversation takes the full width, and the composer and Settings are sized for touch."
+  }
+}

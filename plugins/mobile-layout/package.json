@@ -1,0 +1,33 @@
+{
+  "name": "@local/dsh-mobile-layout",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Mobile layout adapter for the DeepSeek Harness Web UI: a drawer sidebar, full-width conversation and touch-sized controls on narrow screens.",
+  "icon": "./icon.svg",
+  "meta": {
+    "title": "Mobile Layout",
+    "description": "Adapts the Harness Web UI to phones: sidebar drawer, full-width conversation, composer and settings tuned for narrow screens."
+  },
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "icon.svg",
+    "locale/*.json"
+  ],
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": ["@deepseek-ai/dsh-client-ui-layout", "@deepseek-ai/dsh-client-ui-settings"]
+    }
+  }
+}
