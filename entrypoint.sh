@@ -12,15 +12,19 @@
 #                   discovered later as confusing per-tool errors.
 #   2. doctor     — log the Linux sandbox rung this kernel will actually use.
 #   3. overlay    — materialise the one deployment patch this image needs: the
-#                   webserver row's bind host. `dsh web --host 0.0.0.0` is
-#                   rejected by the CLI on purpose, but a reverse proxy talks to
-#                   the container's bridge address, so the container must bind
-#                   all interfaces. We pass it as a `--patch` overlay rather than
-#                   editing the profile's own cordis.patch.yml: overlays are
-#                   applied last, are idempotent, and survive image upgrades.
-#                   (The profile file is initialised with an empty `[]` document,
-#                   so appending entries to it would produce invalid YAML.)
+#                   webserver row's bind host. The row rejects a wildcard address
+#                   (0.2.1 moved that guard from the `--host` flag into the config
+#                   schema), so the container binds its OWN IPv4, discovered at
+#                   start; the caddy service reaches it over the compose network.
+#                   We pass it as a `--patch` overlay rather than editing the
+#                   profile's own cordis.patch.yml: overlays are applied last, are
+#                   idempotent, and survive image upgrades. (The profile file is
+#                   initialised with an empty `[]` document, so appending entries
+#                   to it would produce invalid YAML.)
 #   4. exec       — hand over to dsh.
+#
+# It also tightens /data/dsh/.credentials.yaml to mode 600 when needed: 0.2.1
+# refuses to start on a credentials file group/other can read.
 #
 # Extra app arguments may be passed as the container command, e.g.
 #   command: ["--port", "9000"]
@@ -30,14 +34,80 @@ set -euo pipefail
 
 DSH_HOME="${DSH_HOME:-/data/dsh}"
 SUBCMD="${DSH_SUBCOMMAND:-web}"
-BIND_HOST="${DSH_BIND_HOST:-0.0.0.0}"
+# The bind address is RESOLVED, not defaulted: dsh 0.2.1 rejects a wildcard bind
+# at the config layer and requires a concrete IP literal (see step 3).
+BIND_HOST_REQUEST="${DSH_BIND_HOST:-auto}"
+BIND_HOST=""
 BIND_PORT="${DSH_BIND_PORT:-3080}"
 OVERLAY_DIR="${DSH_HOME}/.runtime"
 OVERLAY="${OVERLAY_DIR}/webserver-bind.yml"
+# Where the resolved address is published for the compose healthcheck, which
+# cannot otherwise know what this container bound.
+BIND_HOST_FILE="${OVERLAY_DIR}/bind-host"
 
 log()  { printf '[dsh] %s\n' "$*" >&2; }
 warn() { printf '[dsh] WARNING: %s\n' "$*" >&2; }
 die()  { printf '[dsh] ERROR: %s\n' "$*" >&2; exit 1; }
+
+# Plausible dotted-quad. The webserver schema parses the value properly; this only
+# decides whether to trust the operator's string or fall back to detection.
+looks_like_ipv4() {
+  [[ "$1" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]]
+}
+
+# The container's primary non-loopback IPv4, or empty.
+#
+# Node is the primary detector on purpose: it is guaranteed to be in this image,
+# `os.networkInterfaces()` is exactly the interface table (no parsing, no
+# sbin-vs-bin PATH question), and it reports the address the socket will bind.
+# `ip` (iproute2) and `hostname -I` stay as fallbacks for a stripped image.
+detect_bind_host() {
+  local found=""
+  if command -v node >/dev/null 2>&1; then
+    found="$(node -e 'const os = require("node:os"); for (const list of Object.values(os.networkInterfaces())) { for (const entry of list ?? []) { if (entry.family === "IPv4" && !entry.internal) { process.stdout.write(entry.address); process.exit(0); } } }' 2>/dev/null || true)"
+  fi
+  if [[ -z "$found" ]] && command -v ip >/dev/null 2>&1; then
+    found="$(ip -4 -o addr show scope global 2>/dev/null \
+      | awk '{print $4}' | cut -d/ -f1 | grep -v '^127\.' | head -n1 || true)"
+  fi
+  if [[ -z "$found" ]] && command -v hostname >/dev/null 2>&1; then
+    found="$(hostname -I 2>/dev/null | tr ' ' '\n' \
+      | grep -E '^[0-9]+(\.[0-9]+){3}$' | grep -v '^127\.' | head -n1 || true)"
+  fi
+  printf '%s' "$found"
+}
+
+# Decide what the `webserver` row binds, from DSH_BIND_HOST (auto | literal).
+#
+# Why this is not just "0.0.0.0": 0.2.1 added a CONFIG-layer guard (the CLI flag
+# guard existed before), so the row itself rejects any wildcard with
+#   webserver: host "0.0.0.0" is an unspecified (wildcard) address, ...
+# and it also rejects a hostname ("not a concrete IPv4 or IPv6 address literal").
+# A container behind the proxy still has to accept a connection from another
+# container, so the answer is the container's OWN address, discovered at start.
+resolve_bind_host() {
+  local requested="$1" detected=""
+  case "$requested" in
+    auto | "") ;;
+    *)
+      if [[ "$requested" == "0.0.0.0" || "$requested" == "::" || "$requested" == "*" ]]; then
+        warn "DSH_BIND_HOST=$requested is a wildcard address, and dsh 0.2.1 rejects it in the webserver row (not only in the --host flag). Detecting this container's address instead: the caddy service reaches it over the compose network, so nothing outside the network is exposed."
+      elif looks_like_ipv4 "$requested" || [[ "$requested" == *:* ]]; then
+        BIND_HOST="$requested"
+        return 0
+      else
+        warn "DSH_BIND_HOST=$requested is not an IP literal. dsh 0.2.1 requires a concrete IPv4/IPv6 literal for the webserver row (a hostname is rejected), so detecting this container's address instead."
+      fi
+      ;;
+  esac
+  detected="$(detect_bind_host)"
+  if [[ -n "$detected" ]]; then
+    BIND_HOST="$detected"
+  else
+    BIND_HOST="127.0.0.1"
+    warn "no non-loopback IPv4 found on this container, so the GUI binds 127.0.0.1. Another container cannot reach that: set DSH_BIND_HOST to a concrete address, or run this service with network_mode: host."
+  fi
+}
 
 # ── 0. pick the right dsh ───────────────────────────────────────────────────
 #
@@ -144,6 +214,35 @@ elif [[ ! -w "$SETTINGS_FILE" ]]; then
   warn "$SETTINGS_FILE is not WRITABLE by uid $(id -u):$(id -g): the settings pages will load but every save fails. On the host: sudo chown $(id -u):$(id -g) <repo>/data/dsh/settings.yaml"
 else
   log "settings document: $SETTINGS_FILE (host-shared, writable)"
+fi
+
+# The credentials document. `dsh-credentials-local` (0.2.1) refuses to start when
+# the file is readable by group or other — assertOwnerOnly() at module init:
+#   credentials-local: /data/dsh/.credentials.yaml is readable beyond its owner
+#   (mode 777); run "chmod 600 ..." before starting again
+# That is a hard boot failure for the `credentials` service, and `connection`,
+# `authorization`, `deepseek-account` and every plugin that needs them wait on it,
+# so the GUI dies with "3 required plugins did not activate" and never opens a
+# port. The file is created 0600 by the provider itself; a hand-written, copied or
+# host-created one carries whatever umask produced it (a bind-mounted directory
+# populated on Windows/macOS routinely shows 0777), so tighten it here where the
+# runtime uid can, and say exactly what to run on the host when it cannot.
+CREDENTIALS_FILE="${DSH_HOME}/.credentials.yaml"
+if [[ -e "$CREDENTIALS_FILE" && ! -f "$CREDENTIALS_FILE" ]]; then
+  die "$CREDENTIALS_FILE is not a regular file, and dsh 0.2.1 refuses to start with a credentials path it cannot stat as a file. On the host: rm -rf <repo>/data/dsh/.credentials.yaml (the credentials are re-entered in the GUI), then docker compose up -d --force-recreate"
+elif [[ -f "$CREDENTIALS_FILE" ]]; then
+  cred_mode="$(stat -c '%a' "$CREDENTIALS_FILE" 2>/dev/null || true)"
+  if [[ -n "$cred_mode" ]] && (( 8#${cred_mode} & 8#077 )); then
+    if chmod 600 "$CREDENTIALS_FILE" 2>/dev/null; then
+      log "credentials document: $CREDENTIALS_FILE tightened ${cred_mode} -> 600 (dsh 0.2.1 refuses group/other-readable credentials)"
+    else
+      die "$CREDENTIALS_FILE is mode ${cred_mode} and this container cannot chmod it (uid $(id -u) does not own it). dsh 0.2.1 refuses to start on a group/other-readable credentials file. On the host: sudo chmod 600 <repo>/data/dsh/.credentials.yaml  (and sudo chown -R $(id -u):$(id -g) <repo>/data/dsh if the owner is wrong)"
+    fi
+  elif [[ -n "$cred_mode" ]]; then
+    log "credentials document: $CREDENTIALS_FILE (mode ${cred_mode}, owner-only)"
+  else
+    warn "cannot read the mode of $CREDENTIALS_FILE; dsh 0.2.1 will refuse to start if it is group/other-readable. On the host: sudo chmod 600 <repo>/data/dsh/.credentials.yaml"
+  fi
 fi
 
 # Built-in skills. The mechanism is always on: DSH_BUNDLED_SKILL_DIR is
@@ -385,25 +484,37 @@ fi
 # A patch replaces the targeted row's whole `config`, so every key the row owns
 # has to be restated here — including the ones this deployment never sets.
 #
-# 0.2.1-rc.2 added `tls: !!js ctx.webStartup.tls` to the webserver row (the flag
-# family grew --tls-cert/--tls-key). Omitting it here would not fail the boot: it
-# would silently DROP a TLS configuration supplied on the command line, because
-# the overlay's config replaces the bundle's. It stays an expression, so the
-# normal case (no --tls-* flags → undefined → plain HTTP behind Caddy) is
-# unchanged, and the flags keep working if somebody fronts this container
-# directly.
+# WHY THE BIND ADDRESS IS DETECTED, NOT 0.0.0.0 (changed in 0.2.1-rc.2):
+# the webserver row now validates its own config, so a wildcard is rejected when
+# the plugin activates — not only when `--host` is passed:
+#   webserver: host "0.0.0.0" is an unspecified (wildcard) address, ... bind one
+#   concrete IPv4 or IPv6 address of a local interface instead
+# and a hostname is rejected as well ("not a concrete IPv4 or IPv6 address
+# literal"). `--dump-config` does NOT run the schema, so this only ever surfaces
+# at boot. A container behind the proxy must still accept a connection from
+# another container, so the bind address is this container's own IPv4, discovered
+# on every start (the proxy resolves `dsh` by name, so it follows a new address
+# automatically).
 #
-# `host`/`port` keep the `!!js` expressions from the bundle layer so that a
-# `--port` app argument still wins over the default.
+# 0.2.1-rc.2 also added `tls: !!js ctx.webStartup.tls` to that row (the flag family
+# grew --tls-cert/--tls-key). Omitting it here would not fail the boot: it would
+# silently DROP a TLS configuration supplied on the command line, because the
+# overlay's config replaces the bundle's. It stays an expression, so the normal
+# case (no --tls-* flags → undefined → plain HTTP behind Caddy) is unchanged.
+#
+# `port` keeps its `!!js` expression so a `--port` app argument still wins.
+
+resolve_bind_host "$BIND_HOST_REQUEST"
 
 cat >"$OVERLAY" <<EOF
 # Generated by /usr/local/bin/dsh-entrypoint at $(date -u +%Y-%m-%dT%H:%M:%SZ).
 # Do not edit: it is rewritten on every container start.
 #
-# Why: the dsh CLI refuses \`--host 0.0.0.0\` by design, but a container behind a
-# reverse proxy must accept connections on its bridge interface. host: 0.0.0.0
-# is intentional and safe here only because this service publishes no port of
-# its own — the caddy service is the single network entry point.
+# Why: dsh 0.2.1 refuses a wildcard bind in the webserver row, so this container
+# binds its OWN address (${BIND_HOST}) instead of every interface. That is safe
+# here because this service publishes no port of its own — the caddy service is
+# the single network entry point, and it reaches this address over the compose
+# network.
 - id: webserver
   config:
     host: ${BIND_HOST}
@@ -414,7 +525,10 @@ cat >"$OVERLAY" <<EOF
     compressionThresholdBytes: 1024
 EOF
 
-log "wrote bind overlay $OVERLAY (host=${BIND_HOST}, port=${BIND_PORT})"
+log "wrote bind overlay $OVERLAY (host=${BIND_HOST}, port=${BIND_PORT}; requested ${BIND_HOST_REQUEST})"
+# Published for the compose healthcheck: it has to probe the address the server
+# actually listens on, and 127.0.0.1 is no longer that address.
+printf '%s\n' "$BIND_HOST" > "$BIND_HOST_FILE"
 
 # Self-check the overlay, because a patch whose target does not match is
 # reported but does not abort the boot: we would rather shout here than let the
@@ -470,8 +584,15 @@ fi
 # ever tripping `set -e` and aborting the container with no useful log.
 read -r -a TRUSTED <<<"$(printf '%s' "${DSH_TRUSTED_HOSTS:-}" | tr ',' ' ')" || true
 
-if [[ "$BIND_HOST" == "0.0.0.0" && "${#TRUSTED[@]}" -eq 0 ]]; then
-  warn "the container binds all interfaces but DSH_TRUSTED_HOSTS is empty."
+# A non-loopback bind means a browser reaches this GUI under an authority the fence
+# does not know by construction (it accepts loopback and the container's own LAN
+# literals only), so an empty DSH_TRUSTED_HOSTS guarantees 403 from the proxy.
+case "$BIND_HOST" in
+  127.* | ::1) bind_is_loopback=1 ;;
+  *) bind_is_loopback=0 ;;
+esac
+if [[ "$bind_is_loopback" -eq 0 && "${#TRUSTED[@]}" -eq 0 ]]; then
+  warn "the GUI binds ${BIND_HOST} (reachable through the proxy) but DSH_TRUSTED_HOSTS is empty."
   warn "The /api browser-trust fence only accepts the loopback host and the container's own LAN literals, so a browser reaching this GUI through the proxy will get 403."
   warn "Set DSH_TRUSTED_HOSTS to the authority the browser uses, e.g. dsh.example.com"
 fi

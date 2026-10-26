@@ -230,9 +230,31 @@ echo "[8/8] fence enforcement + WebSocket"
 # which answers 401 for any missing session regardless of Host.
 # It also runs INSIDE the container against DSH directly: through Caddy a wrong
 # Host would be answered by Caddy's own site matching, proving nothing.
-WRONG="$(docker compose exec -T dsh curl -s -o /dev/null -w '%{http_code}' \
-  -H 'Host: not-the-configured-name.invalid' http://127.0.0.1:3080/api/verify-probe 2>/dev/null)"
+#
+# The probe address is the one the server bound, not 127.0.0.1: dsh 0.2.1 rejects
+# wildcard binds, so the entrypoint binds the container's own IPv4 and publishes it
+# to $DSH_HOME/.runtime/bind-host. `DSH_INNER_ADDR` overrides (e.g. for
+# network_mode: host).
+INNER="${DSH_INNER_ADDR:-}"
+if [[ -z "$INNER" ]]; then
+  INNER="$(docker compose exec -T dsh cat /data/dsh/.runtime/bind-host 2>/dev/null | tr -d '\r\n')"
+fi
+if [[ -z "$INNER" ]]; then
+  INNER="127.0.0.1"
+  note "could not read /data/dsh/.runtime/bind-host; probing 127.0.0.1"
+else
+  note "probing the container's bound address: ${INNER}"
+fi
+# Same precedence as the deployment: the environment, then .env, then the default.
+INNER_PORT="${DSH_BIND_PORT:-$(grep -m1 '^DSH_BIND_PORT=' .env 2>/dev/null | cut -d= -f2-)}"
+[[ -n "${INNER_PORT}" ]] || INNER_PORT=3080
+WRONG="$(docker compose exec -T dsh curl --noproxy '*' -s -o /dev/null -w '%{http_code}' \
+  -H 'Host: not-the-configured-name.invalid' "http://${INNER}:${INNER_PORT}/api/verify-probe" 2>/dev/null)"
 expect "wrong Host on /api straight to DSH -> 403" "403" "$WRONG"
+if [[ "$WRONG" == "000" || -z "$WRONG" ]]; then
+  note "no connection to ${INNER}:${INNER_PORT} — the server may have bound another address;"
+  note "check: docker compose exec -T dsh cat /data/dsh/.runtime/bind-host"
+fi
 
 if [[ -n "${JAR:-}" && -s "$JAR" ]]; then
   # shellcheck disable=SC2086

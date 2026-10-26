@@ -2,11 +2,15 @@ name: dsh
 
 # DeepSeek Harness Web GUI behind one TLS reverse proxy.
 #
-#   browser ──HTTPS──> caddy ──HTTP (compose network)──> dsh:3080
+#   browser ──HTTPS──> caddy ──HTTP (compose network)──> dsh:<container IPv4>:3080
 #
-# The dsh service publishes no port. Caddy is the only network entry point,
-# which is what lets the container bind 0.0.0.0 internally while the host still
-# exposes nothing but the TLS port.
+# The dsh service publishes no port. Caddy is the only network entry point.
+#
+# The backend binds ITS OWN container address, not 0.0.0.0: dsh 0.2.1 rejects a
+# wildcard bind in the webserver row's config schema (the guard used to live only
+# on the --host flag). entrypoint.sh detects the address at every start and writes
+# it to /data/dsh/.runtime/bind-host; Caddy resolves `dsh` by name, so it follows
+# the container wherever compose puts it.
 
 x-dsh-image: &dsh-image
   build:
@@ -39,7 +43,12 @@ services:
       # DSH_* names are bootstrap-only: they must arrive as real environment
       # variables, never through a .env file inside the container.
       DSH_HOME: /data/dsh
-      DSH_BIND_HOST: "0.0.0.0"
+      # auto = bind this container's own IPv4, discovered by the entrypoint.
+      # dsh 0.2.1 rejects 0.0.0.0/:: in the webserver row and requires a concrete
+      # IP literal, so a wildcard here is detected and replaced (with a warning).
+      # Set an explicit address only for network_mode: host or a loopback-only
+      # setup (e.g. 127.0.0.1 + an SSH tunnel).
+      DSH_BIND_HOST: ${DSH_BIND_HOST:-auto}
       DSH_BIND_PORT: ${DSH_BIND_PORT:-3080}
       # Inherited environment outranks the managed credential file and any
       # workspace .env, so a cloned repository cannot redirect this key.
@@ -52,6 +61,13 @@ services:
       # Empty value => no --trusted-host flag => browser accesses get 403.
       DSH_TRUSTED_HOSTS: ${DSH_TRUSTED_HOSTS:-}
       DSH_TELEMETRY_DISABLED: ${DSH_TELEMETRY_DISABLED:-1}
+      # The caddy service clears its proxy variables entirely; this one needs
+      # external egress (model endpoints), so it only bypasses the private ranges.
+      # Without this, Docker's injected HTTP(S)_PROXY also catches requests to
+      # THIS container's own address and to the compose network — which is what
+      # the healthcheck does, and what the agent's own curl/wget/git will do.
+      NO_PROXY: ${DSH_NO_PROXY:-127.0.0.1,localhost,172.16.0.0/12}
+      no_proxy: ${DSH_NO_PROXY:-127.0.0.1,localhost,172.16.0.0/12}
       # Bundled plugins ship at /opt/dsh-plugins (every directory under plugins/ is
       # copied there at build time) and are enabled at container start. Point this at
       # a mounted host directory to add plugins without rebuilding the image.
@@ -117,8 +133,14 @@ services:
     stop_grace_period: 15s
     # GET / without a valid browser cookie answers 401, which is the healthy
     # state for a server that has never been logged into.
+    #
+    # The probe target is the address the server actually bound: the entrypoint
+    # publishes it to $DSH_HOME/.runtime/bind-host on every start, because 0.2.1
+    # no longer allows (and this service no longer uses) 0.0.0.0 — 127.0.0.1 is
+    # only correct in the loopback-only setup. The `|| echo` keeps a healthcheck
+    # that runs before the first start from looping on a missing file.
     healthcheck:
-      test: ["CMD-SHELL", "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$${DSH_BIND_PORT:-3080}/ | grep -qE '^(200|401)$'"]
+      test: ["CMD-SHELL", "curl --noproxy '*' -s -o /dev/null -w '%{http_code}' \"http://$$(cat /data/dsh/.runtime/bind-host 2>/dev/null || echo 127.0.0.1):$${DSH_BIND_PORT:-3080}/\" | grep -qE '^(200|401)$'"]
       interval: 30s
       timeout: 5s
       retries: 5

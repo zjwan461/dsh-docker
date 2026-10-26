@@ -23,17 +23,18 @@ Caddy 已经同时承担了**域名虚拟主机、TLS 终结、反向代理**三
 
 ## 为什么是这样设计的（都是对着 `@deepseek-ai/dsh` 的 0.2.1-rc.2 源码核过的；0.1.5-rc.x / 0.2.0-rc.x 的结论仍然有效）
 
-> 版本基线：本仓库已适配 **0.2.1-rc.2**（原为 0.2.0-rc.2）。0.2.1 改了四处**会直接影响本部署**的东西——profile 不再向 `$DSH_HOME` 投影安装树、设置页改为走 `remote.settings`、客户端 bundle 从 `lib/client.js` 拆成 `lib/client.browser.js`、`webserver` 行的 config 多了 `tls`——外加「依赖全部精确锁版」这一项顺带简化。逐条差异与升级动作见「[升级到 0.2.1-rc.2](#升级到-021-rc2)」。
+> 版本基线：本仓库已适配 **0.2.1-rc.2**（原为 0.2.0-rc.2）。0.2.1 改了六处**会直接影响本部署**的东西——profile 不再向 `$DSH_HOME` 投影安装树、设置页改为走 `remote.settings`、客户端 bundle 从 `lib/client.js` 拆成 `lib/client.browser.js`、`webserver` 行的 config 多了 `tls`、**该行不再接受 `0.0.0.0`**、**`.credentials.yaml` 必须 owner-only**——外加「依赖全部精确锁版」这一项顺带简化。逐条差异与升级动作见「[升级到 0.2.1-rc.2](#升级到-021-rc2)」。
 
 | 事实 | 由此产生的设计 |
 |---|---|
 | CLI 依赖 `commander@15`（`>=22.12`），且 0.2.1-rc.2 的 `@deepseek-ai/libreoffice-kit` engines 为 `>=22.19.0` | Node 必须 ≥ 22.19，故用 NodeSource 在 Debian glibc 基线上装 Node 22；**构建期断言**这个下限 |
 | `node-pty` 自带 `prebuilds/linux-x64`，`sharp`/`ripgrep`/`landlock-run` 都是预编译 npm 包 | 镜像里不需要 gcc/python-dev；**不要用 Alpine**（musl 下 `node-pty` 会退化成源码编译） |
 | Linux 沙箱链是 `bwrap → Landlock`，按顺序探测，两者都不可用则 fail closed（`SANDBOX_UNAVAILABLE`） | 镜像**故意不装 bubblewrap**，让容器稳定落到无需任何特权的 Landlock |
-| `dsh web --host 0.0.0.0` 被 CLI 明确拒绝（usage error 退出） | 用 `--patch` 覆盖层把 `webserver` 行的 `host` 改成 `0.0.0.0`（只有容器内网可见）。**0.2.1 起该行的 `config` 多了一个 `tls`，覆盖层必须一并重述**，否则命令行给的 `--tls-cert/--tls-key` 会被静默丢掉 |
+| `dsh web --host 0.0.0.0` 被 CLI 拒绝；**0.2.1 起连 `webserver` 行的 `host` 也拒通配地址**（只接受具体 IPv4/IPv6 字面量，主机名也不行），而且这个校验只在插件激活时跑，`--dump-config` 看不出来 | 用 `--patch` 覆盖层把 `webserver` 行的 `host` 改成**容器自己的 IPv4**（entrypoint 每次启动探测，写进 `/data/dsh/.runtime/bind-host` 供 healthcheck 与 `verify.sh` 使用）；caddy 用 `dsh:<port>` 按名字连，自动跟上。**该行的 `config` 在 0.2.1 还多了一个 `tls`，覆盖层必须一并重述**，否则命令行给的 `--tls-cert/--tls-key` 会被静默丢掉 |
 | 每个请求要过 Host/Origin 信任围栏，`--trusted-host` 决定放行哪些 authority | 必须设置 `DSH_TRUSTED_HOSTS` 为浏览器实际使用的 `host`，否则 403。0.2.1 的 `--trusted-host <authority...>` 是可重复的变参，entrypoint 仍一个 authority 一个 flag（两种语义下都成立） |
 | 会话 cookie 故意不带 `Secure` 标志（项目假设 loopback HTTP） | **绝不要**为同一域名再开明文 HTTP；只发布 TLS 端口并上 HSTS |
 | 首次访问需要 `?token=...` 换取签名 cookie，密钥持久化在 `$DSH_HOME/.credentials.yaml` | 卷要持久化（同一签名密钥 ⇒ cookie 在重启后仍可复用） |
+| **0.2.1 起** `$DSH_HOME/.credentials.yaml` 必须是 owner-only（group/other 位为 0），否则 `credentials` 插件在 init 阶段就报错退出，连带 `connection`/`authorization`/`deepseek-account` 全部不激活 ⇒ 容器起不来 | entrypoint 每次启动检查并 `chmod 600`；容器内改不动时直接报出宿主上的修复命令。绑定目录在 Windows/macOS 上生成的文件常见 0777，这是升级后最常见的启动失败 |
 | `DSH_*` 前缀变量是 bootstrap-only，不能来自任何 `.env` | `DSH_HOME` 等必须用 compose `environment` 传 |
 | 凭据解析顺序：继承环境 > `$DSH_HOME/.credentials.yaml` > cwd `.env` > `$DSH_HOME/.env` | `DEEPSEEK_API_KEY` 用真实环境变量传，避免被工作区里克隆来的 `.env` 劫持 |
 | 首次初始化 profile 会写入 `cordis.patch.yml`（模板内容仍是 `[]` 文档） | entrypoint 不改这个文件（往 `[]` 后追加会得到非法 YAML），改用 `--patch` 覆盖层 |
@@ -247,7 +248,7 @@ DSH 的登录 token 每次进程启动重新随机生成，只在日志里出现
 docker compose logs dsh | grep -o 'https\?://[^ ]*token=[A-Za-z0-9._-]*' | tail -1
 ```
 
-把打印出的 URL 里的 `http://127.0.0.1:3080` 换成 `https://` + 你的 `DSH_SITE_ADDRESS`（该变量只存 authority，scheme 在 Caddyfile 里）：
+把打印出的 URL 里的 `http://<容器地址>:3080` 换成 `https://` + 你的 `DSH_SITE_ADDRESS`（该变量只存 authority，scheme 在 Caddyfile 里）。0.2.1 起这个地址是**容器自己的 IPv4**（见「[升级到 0.2.1-rc.2](#升级到-021-rc2)」第 6 条），不要拿它直接访问，它只在 compose 网络内可达：
 
 ```
 https://dsh.example.com/?token=xxxxx
@@ -358,6 +359,8 @@ docker compose exec dsh sh -lc '
 
 然后 `ssh -L 3080:127.0.0.1:3080 <user>@<server>`，浏览器打开 `http://127.0.0.1:3080/?token=<从 docker compose logs dsh 取>`。Host `127.0.0.1` 天然过信任围栏、cookie 绑 `127.0.0.1:3080`、`isLoopback` 为真 → 完整设置可用；端口只绑宿主 loopback，网络上访问不到。
 
+> **别把 `DSH_BIND_HOST` 设成 `127.0.0.1` 来配合这个映射**：Docker 的端口发布是 DNAT 到**容器 IP**，容器里只监听 loopback 的话宿主侧转发进来是连不上的。保持 `auto`（容器自己的 IPv4）即可，浏览器看到的 Host 仍然是 `127.0.0.1:3080`。只有 `network_mode: host` 的部署才适合把 `DSH_BIND_HOST` 指向 `127.0.0.1`。
+
 > 换 loopback 访问后浏览器是**另一套 cookie**（authority 不同），需要用同一个 token 重新登录一次；token 与域名访问共享，不用重启容器。
 
 ## 验证清单
@@ -401,8 +404,9 @@ curl -s -o /dev/null -w '%{http_code}\n' \
 
 # 6) 围栏确实在拦：故意发错的 Host，**直连容器**应得 403
 #    （必须绕过 Caddy：Caddy 会用自己的站点匹配先回 404，测不到围栏）
-docker compose exec -T dsh curl -s -o /dev/null -w '%{http_code}\n' \
-  -H 'Host: nope.invalid' http://127.0.0.1:3080/
+#    0.2.1 起容器只绑自己的 IPv4，所以要连那个地址而不是 127.0.0.1：
+docker compose exec -T dsh curl --noproxy '*' -s -o /dev/null -w '%{http_code}\n' \
+  -H 'Host: nope.invalid' "http://$(docker compose exec -T dsh cat /data/dsh/.runtime/bind-host | tr -d '\r\n'):3080/"
 
 # 7) 一次跑完以上全部，外加 WebSocket 升级检查
 bash verify.sh
@@ -462,7 +466,10 @@ curl.exe -k -s -o NUL -w '%{http_code}' -b "$env:TEMP\dsh.jar" https://dsh.examp
 
 ```bash
 # 内部健康检查（401 = 正常，表示已启动但未登录）
-docker compose exec dsh curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3080/
+# 0.2.1 起容器绑的是自己的 IPv4（不是 0.0.0.0，也不保证是 127.0.0.1），
+# compose 的 healthcheck 就是读这个文件来探的：
+docker compose exec dsh sh -lc 'cat /data/dsh/.runtime/bind-host'
+docker compose exec dsh sh -lc 'curl --noproxy "*" -s -o /dev/null -w "%{http_code}\n" "http://$(cat /data/dsh/.runtime/bind-host):${DSH_BIND_PORT:-3080}/"'
 
 # 沙箱真的在生效：在 GUI 里让 agent 跑一次 bash 写 /etc/probe，期望看到
 #   [sandbox: file access denied under workspace-write mode]
@@ -481,7 +488,8 @@ docker compose logs caddy | grep -i -E 'certificate|obtain|error'
 
 | # | 检查 | 期望 | 不符合时 |
 |---|---|---|---|
-| 1 | `docker compose logs dsh \| grep -E 'dsh version\|settings-UI patch'` | `dsh version: 0.2.1-rc.2` + `settings-UI patch present` | 版本不对 ⇒ `.env` 的 `DSH_VERSION` 与镜像 tag 不一致；补丁缺失 ⇒ 插件包在构建后被重装/替换过 ⇒ `docker compose build && docker compose up -d` |
+| 1 | `docker compose logs dsh \| grep -E 'dsh version\|credentials document\|bind overlay\|settings-UI patch'` | `dsh version: 0.2.1-rc.2`、`credentials document: … (mode 600, owner-only)`、`bind overlay … (host=<容器的 IPv4>)`、`settings-UI patch present` | 版本不对 ⇒ `.env` 的 `DSH_VERSION` 与镜像 tag 不一致；补丁缺失 ⇒ 插件包在构建后被重装/替换过 ⇒ `docker compose build && docker compose up -d`；`host=127.0.0.1` ⇒ 见排障表「caddy 502」那条 |
+| 1b | `docker compose ps` | dsh 为 `healthy` | healthcheck 探的就是 `bind-host` 里的地址；`unhealthy` 先看上面第 1 条的 `bind overlay` 日志 |
 | 2 | 浏览器打开 GUI → 设置 → 模型 | 列出 provider（DeepSeek 与你的自定义 provider），可编辑并保存 | 0.2.1 起 Models 页走 `remote.settings`，不再依赖 `isLoopback`；页面若仍报旧版的 `settings are available in this browser`，说明跑的不是 0.2.1（先看第 1 条） |
 | 2b | 设置 → 通用：导出/导入设置文档 | 按钮可用（不再因域名访问而消失） | 只有这一处依赖补丁；回到第 1 条 |
 | 3 | 在模型页改一项并保存，宿主上 `git diff data/dsh/settings.yaml` | 看到 UI 的写入落到宿主文件 | `data/dsh` 不是目录挂载，或属主与 `DSH_UID` 不一致（见排障表） |
@@ -502,7 +510,7 @@ docker compose logs caddy | grep -i -E 'certificate|obtain|error'
 
 ## 升级到 0.2.1-rc.2
 
-本仓库从 **0.2.0-rc.2** 适配到 **0.2.1-rc.2**。上游这一版动了四处会影响本部署的东西（外加一项顺带简化），下面按「症状 → 本仓库怎么处理」列清楚，便于你 review 和以后升级时复用这套方法。
+本仓库从 **0.2.0-rc.2** 适配到 **0.2.1-rc.2**。上游这一版动了六处会影响本部署的东西（外加一项顺带简化），下面按「症状 → 本仓库怎么处理」列清楚，便于你 review 和以后升级时复用这套方法。
 
 ### 1. profile 不再把安装树投影到 `$DSH_HOME`
 
@@ -537,7 +545,44 @@ docker compose logs caddy | grep -i -E 'certificate|obtain|error'
 
 patch **整体替换**该行的 `config`，所以 entrypoint 生成的覆盖层必须一并重述 `tls`，否则命令行上的 `--tls-cert/--tls-key` 会被静默丢弃（实测：不加这一行，dump 出来的 config 里没有 `tls` 键）。
 
-### 5. 依赖全部精确锁版（顺带简化）
+### 5. `webserver` 行不再接受 `0.0.0.0`（**升级后第一个会撞上的坑**）
+
+0.2.0 时通配绑定的拦截只在 `--host` 这个 CLI flag 上，行配置里的 `host: 0.0.0.0` 是放行的——本镜像正是靠 `--patch` 覆盖层写 `0.0.0.0` 才让 caddy 能连进来。0.2.1 把这条守卫搬进了**行自己的 schema**（`dsh-host-webserver` 的 `WebServer.Config.host`）：
+
+```
+webserver: host "0.0.0.0" is an unspecified (wildcard) address, which is not supported:
+binding every interface would expose remote code execution to the network;
+bind one concrete IPv4 or IPv6 address of a local interface instead
+```
+
+而且它只接受**具体 IP 字面量**（主机名会报 `is not a concrete IPv4 or IPv6 address literal`），并且**只在插件激活时校验**——`--dump-config` 不跑 schema，所以构建期自检照样“通过”，直到容器启动才炸：
+
+```
+dsh: startup failed: 3 required plugins did not activate
+  Failed plugins (2): webserver (required) …
+```
+
+本仓库的处理：entrypoint **每次启动探测容器自己的 IPv4**（`ip -4 -o addr show scope global`，退回 `hostname -I`），把它写进覆盖层；同时写一份到 `/data/dsh/.runtime/bind-host`，给 compose healthcheck 和 `verify.sh` 用。caddy 的 upstream 是 `dsh:<port>`（按名字解析），所以容器换了地址它自动跟上。
+
+- `DSH_BIND_HOST=auto`（新默认）：自动探测。
+- `DSH_BIND_HOST=<具体IP>`：照用（`network_mode: host` 或特殊网络时用）。
+- `DSH_BIND_HOST=0.0.0.0`：**警告并改为自动探测**（不静默失败，也不按旧行为硬试）。
+- `DSH_BIND_HOST=127.0.0.1`：只在 `network_mode: host` 时有意义——Docker 的端口发布是 DNAT 到容器 IP，容器只监听 loopback 时宿主转发连不上。
+
+### 6. `$DSH_HOME/.credentials.yaml` 必须是 owner-only（**第二个会撞上的坑**）
+
+0.2.1 的 `dsh-credentials-local` 在 init 阶段就拒绝任何 group/other 可读的凭据文件：
+
+```
+credentials-local: /data/dsh/.credentials.yaml is readable beyond its owner (mode 777);
+run "chmod 600 /data/dsh/.credentials.yaml" before starting again
+```
+
+文件由提供方以 `0600` 创建，但**手写、拷贝、或由宿主机/Windows 端生成的**那份会带宿主 umask（绑定目录里出现 `0777` 很常见），而这是个**硬启动失败**：`credentials` 不激活 → `connection`/`authorization`/`deepseek-account` 以及所有依赖它们的插件全部排队等待 → 界面永远不监听端口。
+
+本仓库的处理：entrypoint 在预检阶段检查该文件的 group/other 位，需要就 `chmod 600`（容器以 `DSH_UID` 运行，属主正确时必然成功）；改不动时**直接给出宿主上的修复命令**，而不是让 dsh 用堆栈把容器拖进重启循环。
+
+### 7. 依赖全部精确锁版（顺带简化）
 
 0.2.1-rc.2 里约 1300 条 `@deepseek-ai/dsh-*` 依赖/peer **全部是精确版本**，不再是 `^0.2.0-rc.2` 这类预发布范围。`.env` / `Dockerfile` 里那套「必须选本系列最新版、否则预发布范围会漂」的长篇说明因此改写为「一个版本决定整棵树」，构建期版本断言保留（它现在防的是混装/去重问题，而不是漂移）。Node 下限也从 22.12 提到 **22.19**（`libreoffice-kit` 的 engines），构建期断言。
 
@@ -548,19 +593,24 @@ git pull                                  # 拿到本次适配
 grep -n 'DSH_VERSION' .env                # 应为 0.2.1-rc.2
 docker compose build --no-cache dsh       # 关键：让新版本重新装 npm 树，别复用旧层缓存
 docker compose up -d
-docker compose logs -f dsh | grep -E 'dsh version|settings-UI patch|profile node_modules|bundled plugin'
+docker compose logs -f dsh | grep -E 'dsh version|credentials document|bind overlay|profile node_modules|bundled plugin|settings-UI patch'
 ```
 
 期望日志（首启）：
 
 ```
 [dsh] dsh version: 0.2.1-rc.2
+[dsh] credentials document: /data/dsh/.credentials.yaml tightened 777 -> 600 (dsh 0.2.1 refuses group/other-readable credentials)
 [dsh] profile node_modules: no installation projection (expected on 0.2.1+)
 [dsh] bundled plugin @local/dsh-file-download: enabled
 [dsh] bundled plugin dsh-minimax-h3: enabled
 [dsh] bundled plugin @local/dsh-login-gate: enabled, options in /data/dsh/cordis.patch.yml
+[dsh] wrote bind overlay /data/dsh/.runtime/webserver-bind.yml (host=172.18.0.2, port=3080; requested auto)
+[dsh] bind overlay verified against the composed config tree
 [dsh] settings-UI patch present: the domain-served GUI edits the host document
 ```
+
+两条 `bind overlay` 日志里的 `host=` 就是 caddy 要连的地址；`docker compose ps` 里 dsh 应变成 `healthy`。如果 binding 行打出的是 `host=127.0.0.1`，说明容器里没探测到非 loopback 地址（`docker compose exec dsh ip -4 addr` 可确认），此时 caddy 会 502。
 
 如果打出了 `found N leftover package link(s) in /data/dsh/profiles/node_modules/@deepseek-ai`，按提示清一次（不影响启动，只是把 0.2.0 的残留去掉）：
 
@@ -617,7 +667,7 @@ docker compose exec dsh dsh plugin --profile web remove <package>
 
 | 现象 | 原因与处理 |
 |---|---|
-| **模型调用失败 / 一直转圈**（走内网 vLLM、LiteLLM 之类的自建端点时） | 头号嫌疑是**代理把内网请求也劫持走了**：容器里被注入了 `HTTP_PROXY`，而 `~/.docker/config.json` 的 `noProxy` 只列了 `172.17.0.0/16`、`192.168.*`、`.corp.local`。若端点地址是 `10.x.x.x`，请求就被送到代理 → 失败。对照验证：<br>`docker compose exec -T dsh curl -s -o /dev/null -w '%{http_code}\n' --max-time 8 http://<端点>:端口/v1/models -H "Authorization: Bearer $KEY"`<br>再加 `--noproxy '*'` 跑一次；**两次结果不一致就确认是代理**。修法：把该 host/IP 加进 `noProxy`（顺带补 `172.16.0.0/12`）。<br>次要嫌疑：容器里写 `localhost` 到不了宿主机——用宿主局域网 IP，或给 dsh 服务加 `extra_hosts: ["host.docker.internal:host-gateway"]`。 |
+| **模型调用失败 / 一直转圈**（走内网 vLLM、LiteLLM 之类的自建端点时） | 头号嫌疑是**代理把内网请求也劫持走了**：容器里被注入了 `HTTP_PROXY`，而 `~/.docker/config.json` 的 `noProxy` 只列了 `172.17.0.0/16`、`192.168.*`、`.corp.local`。若端点地址是 `10.x.x.x`，请求就被送到代理 → 失败。对照验证：<br>`docker compose exec -T dsh curl --noproxy '*' -s -o /dev/null -w '%{http_code}\n' --max-time 8 http://<端点>:端口/v1/models -H "Authorization: Bearer $KEY"`<br>去掉 `--noproxy '*'` 再跑一次；**两次结果不一致就确认是代理**。<br>本 compose 现在给 dsh 服务默认设了 `NO_PROXY=127.0.0.1,localhost,172.16.0.0/12`（容器地址、compose 网络、healthcheck 都靠它），这只覆盖私网段；**`10.x.x.x` / 自定义域名不在里面**，要加就设 `.env` 的 `DSH_NO_PROXY`（例如 `127.0.0.1,localhost,172.16.0.0/12,10.0.0.0/8`），或在 `~/.docker/config.json` 的 `noProxy` 里补。<br>次要嫌疑：容器里写 `localhost` 到不了宿主机——用宿主局域网 IP，或给 dsh 服务加 `extra_hosts: ["host.docker.internal:host-gateway"]`（已默认加）。 |
 | 浏览器**没有**「继续访问」按钮 | 受管 Chrome/Edge 的 `SSLErrorOverrideAllowed=false` 策略会彻底禁用跳过证书错误。打开 `chrome://policy` 搜 `SSLErrorOverrideAllowed`：若为 false，点击继续这条路走不通，只能导入 CA（Option A）或改用 CA 证书（Option B）。 |
 | 以前能点击继续，某天突然进不去且没有绕过选项 | HSTS 生效了。浏览器**不会**从证书错误的连接记录 HSTS，所以只要证书一直不受信任，「继续」就一直可用；但一旦导入过 CA（连接变合法），该域名就被写入 HSTS，此后证书再出问题就没有「继续」按钮了。清除方法：Chrome/Edge → `chrome://net-internals/#hsts` → "Delete domain security policies" 输入 `dsh.example.com`；Firefox → 设置里清除该站点数据。 |
 | 浏览器 403 | `DSH_TRUSTED_HOSTS` 与浏览器实际发出的 Host 头不匹配。规则（已核对实现）：**不带端口的条目匹配任意端口，带端口的条目要求完全一致**。所以默认端口场景必须写裸域名 `dsh.example.com`；写成 `:443` 一定 403。另外该条目必须是裸 authority，写成 `https://dsh.example...` 或带路径会让插件加载直接报错。 |
@@ -631,6 +681,9 @@ docker compose exec dsh dsh plugin --profile web remove <package>
 | 证书申请失败 / 浏览器一直报不安全 | 非公网域名无法走 ACME，这是预期行为。默认的 `tls internal` 需要先信任 Caddy 的根 CA（见上文 Option A）；想要零警告就用内部 CA 证书（Option B）。若日志出现 `obtain` / `acme` 相关错误，说明 `Caddyfile` 里的 `tls internal` 被误删了。 |
 | `caddy` 日志出现 `installing root certificate ... certificate installed properly in linux trusts` | 这是 Caddy 把内置 CA 装进**容器内**的信任库，对宿主机浏览器**无效**，而且容器一重建就失效。浏览器要消除警告仍须按 Option A 手动导入 `caddy-root.crt`（`docker compose cp caddy:/data/caddy/pki/authorities/local/root.crt ./`），或直接用 Option B 的内部 CA 证书。 |
 | `dsh` 容器报 `plugin tree failed to load` / `Cannot find package` | 先看堆栈里有没有 **`/snapshot/deepseek-harness/...`** 前缀 —— 那说明跑的是**另一个**同名的 `dsh`（单文件 Node 可执行体，只有最小 profile、没有 `web` profile），而不是 npm CLI。历史上这个冲突来自 Python SDK 安装的 runtime wheel，**现在镜像里已不含 SDK**，理论上不会再出现；entrypoint 仍显式解析 npm CLI（`DSH_NPM_BIN` → 构建期写下的 `/tmp/dsh-npm-bin.path` → `npm root -g` → 常见前缀），启动时打印 `dsh CLI: ...`，可用 `DSH_CLI` 覆盖。 |
+| **`dsh: startup failed: N required plugins did not activate`**，失败项里有 `webserver (required)`，错误为 `host "0.0.0.0" is an unspecified (wildcard) address` | 0.2.1 把通配绑定拦截搬进了 `webserver` 行的 schema。本镜像的 entrypoint 会探测容器 IPv4 并写进覆盖层；若仍出现，说明 `DSH_BIND_HOST` 被设成了通配地址且探测失败（日志里会有对应 WARNING）。改回 `DSH_BIND_HOST=auto`，或直接设成容器地址（`docker compose exec dsh ip -4 -o addr show scope global`）。**注意 `--dump-config` 查不出这类问题**，它不跑 schema。 |
+| 同上，失败项里有 `credentials`，错误为 `is readable beyond its owner (mode 777)` | 0.2.1 要求 `.credentials.yaml` 为 owner-only。entrypoint 会自动 `chmod 600`；看到这条说明它改不动（文件属主不是 `DSH_UID`）。宿主上：`sudo chmod 600 data/dsh/.credentials.yaml`（必要时连同 `sudo chown -R $(id -u):$(id -g) data/dsh`），再 `docker compose up -d --force-recreate`。 |
+| 日志里 `host=127.0.0.1` 或 caddy 502，但容器是 healthy 状态不明 | 容器没探测到非 loopback 地址（少见：`network_mode: none` 或自定义网络无 IPv4）。`docker compose exec dsh ip -4 addr` 确认后，显式设 `DSH_BIND_HOST` 为可用地址，或改用 `network_mode: host`。 |
 | 改了 `DSH_BIND_PORT` 后不通 | `DSH_UPSTREAM` 会跟着变，检查 `docker compose config` 里 caddy 的 `DSH_UPSTREAM` 与 healthcheck。 |
 | 流式响应「卡住」直到最后才一次性吐完 | 检查是否有中间件在缓冲 SSE：`Caddyfile` 的 site 块必须有 `flush_interval -1`（少了它，GUI 的事件流会被攒到最后才发）。 |
 
@@ -667,13 +720,15 @@ docker compose exec dsh dsh plugin --profile web remove <package>
 
 7. **设置页补丁**（2026-10，对 `0.2.0-rc.2` 实测）：补丁生效、幂等、`--check` 通过、语法校验通过、旧表达式归零。
 
-8. **0.2.1-rc.2 适配**（2026-10-26，本机对着真实 `@deepseek-ai/dsh@0.2.1-rc.2` 安装实测，Windows + Node 24，非容器）：`--profile web --dump-config` 能组合；`dsh web` 从空 home 启动并常驻，`GET /` 无 cookie 401、`/api/*` 无 cookie 401、错误 Host 直连 `/api` 403（与 `verify.sh` 的期望一致）；`profiles/web` 只有 `package.json` / `cordis.yml` / `cordis.patch.yml`，**没有** `profiles/node_modules`；三个自带插件按 entrypoint 的方式链接 + 注入 HOME patch 后出现在组合树里，浏览器 combo bundle 返回 200 且包含它们；补丁脚本对 `lib/client.browser.js` 的锚点匹配、写入、幂等、`--check` 全部通过；entrypoint 的覆盖层带上 `tls` 后 dump 结果里 `tls` 仍在；构建期那套「Node 解析 + 版本比对」断言与插件校验循环，也用本机安装实跑过（9 个包全部解析到 0.2.1-rc.2，无 missing/mismatch）。**容器内**（Linux/landlock/root-vs-uid 权限）仍需一次真实构建确认。
+8. **0.2.1-rc.2 适配**（2026-10-26，本机对着真实 `@deepseek-ai/dsh@0.2.1-rc.2` 安装实测，Windows + Node 24，非容器）：`--profile web --dump-config` 能组合；`dsh web` 从空 home 启动并常驻，`GET /` 无 cookie 401、`/api/*` 无 cookie 401、错误 Host 直连 `/api` 403（与 `verify.sh` 的期望一致）；`profiles/web` 只有 `package.json` / `cordis.yml` / `cordis.patch.yml`，**没有** `profiles/node_modules`；三个自带插件按 entrypoint 的方式链接 + 注入 HOME patch 后出现在组合树里，浏览器 combo bundle 返回 200 且包含它们；补丁脚本对 `lib/client.browser.js` 的锚点匹配、写入、幂等、`--check` 全部通过；构建期那套「Node 解析 + 版本比对」断言与插件校验循环也用本机安装实跑过（9 个包全部 0.2.1-rc.2，无 missing/mismatch）；`webserver` 行**绑定具体 IPv4 时能起并返回 401，绑回环时确实不监听**（证明探测+覆盖层的做法成立）。
+
+9. **第一次真实构建/启动暴露的两个坑（已修，值得记下来）**：`--dump-config` 与构建期自检都**不跑 schema**，所以 (a) `webserver` 行拒绝 `0.0.0.0`、(b) `.credentials.yaml` 必须 owner-only，这两条只能在容器启动时暴露，症状都是 `dsh: startup failed: N required plugins did not activate`。修法见「[升级到 0.2.1-rc.2](#升级到-021-rc2)」第 5、6 条；本仓库已在 entrypoint 里分别做了「探测容器 IPv4」与「chmod 600」。同时发现容器内 `curl` 会被注入的 `HTTP(S)_PROXY` 劫持（healthcheck 也会误判），已在 dsh 服务的环境里补 `NO_PROXY`，并给 healthcheck/verify 的容器内探测加 `--noproxy '*'`。
 
 ### 仍待确认（部署侧动作，不是未知项）
 
 1. **属主**：宿主目录属于别的 uid（实测 10001）时，最省事的是把 `.env` 的 `DSH_UID/DSH_GID` 设成该属主——构建参数会把它带进镜像，`./data/dsh` 这个宿主目录再 chown 一次即可。entrypoint 会打印实际属主与两种修法。
 2. 首次浏览器访问的证书信任：本项目已决定**接受自签警告、点一次继续**（前提是受管浏览器未禁用 `SSLErrorOverrideAllowed`）。
-3. **本轮 0.2.1 适配需要一次构建验证**：构建期会跑 Node 版本下限断言、安装树完整性/版本断言、设置页补丁 `--check`、`--profile web --dump-config`，以及从空 home 的 60 秒启动冒烟；失败点都落在构建阶段，而不是首次打开页面时。
+3. **本轮修改需要一次构建 + 启动验证**：构建期会跑 Node 版本下限断言、安装树完整性/版本断言、设置页补丁 `--check`、`--profile web --dump-config`，以及从空 home 的 60 秒启动冒烟；但**运行期校验（schema、文件权限）只有真正启动才跑**——第一轮就是这么发现 `webserver` 通配绑定与 credentials 权限两处问题的。启动后先看这两行日志：`credentials document: … (mode 600, owner-only)` 与 `bind overlay … (host=<非 127.0.0.1>)`，再看 `docker compose ps` 是否 `healthy`。
 4. **三个自带插件的运行时功能**：0.2.1 下它们都能加载、能被组合进浏览器图，但登录门禁的表单渲染、文件下载的路由、MiniMax H3 的 ComfyUI 调用属于浏览器交互或外部服务，需要你在有 Docker 的环境里点一遍（`README` 的验收清单第 7～9 条附近）。它们用的服务（`webServer`、`webserver/index-inject`、`ctx.connection.fetch.register`、`ctx.fs.readByteRange`、`ctx.workspaceChanges`、`ctx.sandboxPolicy`、`ctx.sessionQuery`）都还在 0.2.1 的安装树里。
 
 ## 内置插件（`plugins/` 目录）
