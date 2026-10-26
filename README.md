@@ -21,20 +21,22 @@ Caddy 已经同时承担了**域名虚拟主机、TLS 终结、反向代理**三
 - **想用 CA 的证书**：不需要 nginx，走下面的 Option B，把证书文件喂给 Caddy 即可。证书由谁签发 ≠ 必须由谁托管。
 - **只有一种情况值得引入 nginx**：TLS 必须在**集中入口**（已有的 nginx / F5 / LB）终结。那时的正确做法是**把 compose 里的 caddy 服务整个删掉**，让 nginx 直接反代 dsh，而不是两层叠加。届时必须做到五件事：`proxy_set_header Host $host`（nginx 默认是 `$proxy_host`，会导致 /api 信任围栏 403）、`proxy_buffering off`（SSE）、WebSocket upgrade 头、`client_max_body_size` 提到 300m 以上（否则上传 413）、以及明文那一跳只允许走 loopback 或 compose 内网。
 
-## 为什么是这样设计的（都是对着 `@deepseek-ai/dsh` 的 0.1.5-rc.x / 0.2.0-rc.x 源码核过的）
+## 为什么是这样设计的（都是对着 `@deepseek-ai/dsh` 的 0.2.1-rc.2 源码核过的；0.1.5-rc.x / 0.2.0-rc.x 的结论仍然有效）
+
+> 版本基线：本仓库已适配 **0.2.1-rc.2**（原为 0.2.0-rc.2）。0.2.1 改了四处**会直接影响本部署**的东西——profile 不再向 `$DSH_HOME` 投影安装树、设置页改为走 `remote.settings`、客户端 bundle 从 `lib/client.js` 拆成 `lib/client.browser.js`、`webserver` 行的 config 多了 `tls`——外加「依赖全部精确锁版」这一项顺带简化。逐条差异与升级动作见「[升级到 0.2.1-rc.2](#升级到-021-rc2)」。
 
 | 事实 | 由此产生的设计 |
 |---|---|
-| CLI 依赖 `commander@15`，engines 为 `>=22.12.0` | Node 必须 ≥ 22.12，故用 NodeSource 在 Debian glibc 基线上装 Node 22 |
+| CLI 依赖 `commander@15`（`>=22.12`），且 0.2.1-rc.2 的 `@deepseek-ai/libreoffice-kit` engines 为 `>=22.19.0` | Node 必须 ≥ 22.19，故用 NodeSource 在 Debian glibc 基线上装 Node 22；**构建期断言**这个下限 |
 | `node-pty` 自带 `prebuilds/linux-x64`，`sharp`/`ripgrep`/`landlock-run` 都是预编译 npm 包 | 镜像里不需要 gcc/python-dev；**不要用 Alpine**（musl 下 `node-pty` 会退化成源码编译） |
 | Linux 沙箱链是 `bwrap → Landlock`，按顺序探测，两者都不可用则 fail closed（`SANDBOX_UNAVAILABLE`） | 镜像**故意不装 bubblewrap**，让容器稳定落到无需任何特权的 Landlock |
-| `dsh web --host 0.0.0.0` 被 CLI 明确拒绝（usage error 退出） | 用 `--patch` 覆盖层把 `webserver` 行的 `host` 改成 `0.0.0.0`（只有容器内网可见） |
-| 每个请求要过 Host/Origin 信任围栏，`--trusted-host` 决定放行哪些 authority | 必须设置 `DSH_TRUSTED_HOSTS` 为浏览器实际使用的 `host`，否则 403 |
+| `dsh web --host 0.0.0.0` 被 CLI 明确拒绝（usage error 退出） | 用 `--patch` 覆盖层把 `webserver` 行的 `host` 改成 `0.0.0.0`（只有容器内网可见）。**0.2.1 起该行的 `config` 多了一个 `tls`，覆盖层必须一并重述**，否则命令行给的 `--tls-cert/--tls-key` 会被静默丢掉 |
+| 每个请求要过 Host/Origin 信任围栏，`--trusted-host` 决定放行哪些 authority | 必须设置 `DSH_TRUSTED_HOSTS` 为浏览器实际使用的 `host`，否则 403。0.2.1 的 `--trusted-host <authority...>` 是可重复的变参，entrypoint 仍一个 authority 一个 flag（两种语义下都成立） |
 | 会话 cookie 故意不带 `Secure` 标志（项目假设 loopback HTTP） | **绝不要**为同一域名再开明文 HTTP；只发布 TLS 端口并上 HSTS |
 | 首次访问需要 `?token=...` 换取签名 cookie，密钥持久化在 `$DSH_HOME/.credentials.yaml` | 卷要持久化（同一签名密钥 ⇒ cookie 在重启后仍可复用） |
 | `DSH_*` 前缀变量是 bootstrap-only，不能来自任何 `.env` | `DSH_HOME` 等必须用 compose `environment` 传 |
 | 凭据解析顺序：继承环境 > `$DSH_HOME/.credentials.yaml` > cwd `.env` > `$DSH_HOME/.env` | `DEEPSEEK_API_KEY` 用真实环境变量传，避免被工作区里克隆来的 `.env` 劫持 |
-| 首次初始化 profile 会写入内容为 `[]` 的 `cordis.patch.yml` | entrypoint 不改这个文件（往 `[]` 后追加会得到非法 YAML），改用 `--patch` 覆盖层 |
+| 首次初始化 profile 会写入 `cordis.patch.yml`（模板内容仍是 `[]` 文档） | entrypoint 不改这个文件（往 `[]` 后追加会得到非法 YAML），改用 `--patch` 覆盖层 |
 | SIGTERM 会优雅退出（最多 5 秒） | `stop_grace_period: 15s`，用 tini 做 PID 1 转发信号 |
 | 一个 harness home 只能装一份 dsh（profiles/ 下同一份 profile 目录） | 本部署只有一个服务：`./data/dsh` 以**目录 bind mount** 挂到 `/data/dsh`。不用命名卷、也不用单文件挂载——设置提供方落盘走「临时文件 + rename」，单文件挂载时 rename 的目标是挂载点（EBUSY），`:ro` 则是 EROFS；只有目录挂载能让宿主编辑与 UI 保存写同一个真文件 |
 
@@ -50,7 +52,7 @@ Caddy 已经同时承担了**域名虚拟主机、TLS 终结、反向代理**三
 | `.env.example` | 所有可调项 |
 | `verify.sh` | 在**物理机**上逐层验证 GUI 链路（DNS→TLS→Caddy→信任围栏→token→cookie→/api→WebSocket），失败项直接给出排查命令 |
 | `data/dsh/settings.yaml` | 服务端配置（提供方/端点/模型），mock 值可直接用。位于 `./data/dsh` 目录挂载内（容器路径 `/data/dsh/settings.yaml`）：**宿主编辑会热重载，Models 页保存也会落到这个文件** |
-| `patch-client-settings.mjs` | 给浏览器 bundle 打补丁，让域名访问时设置页也能读写宿主文档（见「设置页为什么现在能用」）。**构建期以 root 应用**——它改的文件在 root 所有的 npm 全局安装树里，而 profile 的 `node_modules` 只是指向那棵树的符号链接，运行时 uid 无论怎么写都只能 EACCES。entrypoint 每次启动用 `--check` 复核 |
+| `patch-client-settings.mjs` | 给浏览器 bundle 打补丁，让域名访问时 General 设置页仍能操作宿主设置文档（见「设置页为什么现在能用」）。**构建期以 root 应用、随后 `--check` 复核**——它改的文件在 root 所有的 npm 全局安装树里，0.2.1 起 profile 里连符号链接副本都没有了，运行时 uid 无论怎么写都只能 EACCES。entrypoint 每次启动再 `--check` 一次 |
 | `workspaces/` | 工作区 bind mount 源目录 |
 | `skills/` | 内置（bundled）技能目录；构建时 COPY 到镜像 `/opt/dsh-skills`。**目前故意为空**，机制已就绪 |
 | `LICENSE` | Apache License 2.0 全文（与官方文本逐字节一致） |
@@ -99,24 +101,29 @@ Caddy 已经同时承担了**域名虚拟主机、TLS 终结、反向代理**三
 
 设成 `0` 可以瘦身，但**必须重新构建**（`docker compose build && docker compose up -d`）。
 
-### profile 的插件树：是投影，不是安装
+### profile 的插件树：0.2.1 起不再投影，运行时解析
 
-`$DSH_HOME/profiles/web/package.json` 的 `dependencies` 是**空的**——插件集由 `dsh.profile.bundles`（web = `@deepseek-ai/dsh-base` + `@deepseek-ai/dsh-web-app`）指定。dsh 在**启动时**把这些 bundle 及其依赖从**安装树**投影（symlink）到 `$DSH_HOME/profiles/node_modules`（`dsh-app-boot` 的原话是把它接到 Node 的 ESM/CJS 解析器上，并且「安装已提供的包不再安装」）。
+`$DSH_HOME/profiles/web/package.json` 的 `dependencies` 是**空的**——插件集由 `dsh.profile.bundles`（web = `@deepseek-ai/dsh-base` + `@deepseek-ai/dsh-web-app`）指定。**谁把安装树接到 Node 的解析器上，0.2.1-rc.2 变了：**
 
-两个实际结论：
+| | ≤ 0.2.0-rc.2 | 0.2.1-rc.2 |
+|---|---|---|
+| 机制 | 启动时把安装树里的每个包 **symlink 投影**到 `$DSH_HOME/profiles/node_modules`（簿记目录 `<profile>/.dsh-module-fallback`） | **完全不投影**。`dsh-app-boot` 每次启动从安装树现算一份 runtime resolution，直接交给 Node 的 ESM/CJS 解析器 |
+| `profiles/node_modules` 里的内容 | 安装树的镜像 | 只有**本 entrypoint 链接的自带插件** |
+| 升级风险 | 旧 home 的投影会**遮蔽**安装树，且 profile 无依赖 ⇒ dsh 没东西可重装 ⇒ 永远坏，只能 `rm -rf` | 旧投影**不再致命**（它指向同一批绝对路径），但属于死重量；dsh 把它当「linked root」登记，不影响启动 |
+
+三个实际结论：
 
 - **运行时不需要 npm registry**，所以**没有东西可以预装**：`dsh plugin --profile web install` 只会回 `Already up to date`（构建里实测到的就是这个）。
-- **过期的投影是致命的**：从旧 home/卷 `cp -a` 过来的 `profiles/node_modules` 会**遮蔽**安装树，而 profile 没有依赖 ⇒ dsh **没有东西可重装 ⇒ 永远不修复**。症状是 `plugin(s) failed to load: @deepseek-ai/dsh-sandbox-local; could not be resolved` + 重启循环，而且 **chown 不管用**——坏的是内容，不是权限。
-
-修法只有一条命令：
+- **自带插件靠「显式符号链接 + HOME 级 patch」接入**：entrypoint 把 `/opt/dsh-plugins/<name>` 链到 `profiles/node_modules/<name>`。这正是 0.2.1 认的 **linked root**（`linkedProfileRoots` 只收「指向 profiles 树之外」的符号链接，按包名登记给解析器），每次启动用 `ln -sfn` 重建，所以失效目标不会跨重启残留。
+- **从 0.2.0 升级上来的 home 会带一份旧投影**：`profiles/node_modules/@deepseek-ai` 非空即为此。它不是错误、但也没用，entrypoint 会打印出来并给出清理命令（只删宿主目录，容器不动手）：
 
 ```bash
 rm -rf data/dsh/profiles/node_modules && docker compose restart dsh
 ```
 
-entrypoint 每次启动会打印投影的包数；发现「投影包数 < 安装树包数」时会直接把上面这条命令打出来（它**不会**自动删——删的是宿主目录，交给你决定）。
+> 0.2.1 起删这个目录**不再有「删了就必须恢复才能启动」的风险**：dsh 不往里建东西，entrypoint 自己的插件链接下一次启动自动重建。
 
-镜像里还有一道**启动冒烟测试**：构建期从**空 home** 真跑一次 `dsh web --no-open`，60 秒内自己退出即判失败。从空 home 跑是关键，那正是容器首启的路径；而 `--dump-config` 只组合配置、**不 import 插件模块**，坏树它照样「成功」。
+镜像里还有一道**启动冒烟测试**：构建期从**空 home** 真跑一次 `dsh web --no-open`，60 秒内自己退出即判失败。从空 home 跑是关键，那正是容器首启的路径；而 `--dump-config` 只组合配置、**不 import 插件模块**，坏树它照样「成功」。0.2.1 起冒烟测试的解析探针锚在**安装树**上（`profiles/web` 里已经没有可解析的东西了），并额外断言组合出来的 profile 确实点名了这两个 bundle。
 
 LibreOffice 有两点值得说明：
 
@@ -274,6 +281,8 @@ https://dsh.example.com/?token=xxxxx
 
 ## 设置页为什么现在能用（本镜像的补丁）
 
+### 0.2.1 之前：设置文档只能在 loopback 上编辑
+
 `dsh` 决定「设置文档存在哪里」是在**浏览器里**做的，而且是硬编码：
 
 ```js
@@ -281,51 +290,66 @@ https://dsh.example.com/?token=xxxxx
 const persistence = ctx.remote.$host.isLoopback ? "host" : "memory";
 ```
 
-`$host.isLoopback` 来自连接层自己的定义：
+`$host.isLoopback` 来自连接层自己的定义（`dsh-client-connection`）：
 
 ```js
-// dsh-client-connection/lib/client.js
 isLoopback: transport?.ownsHost === true || pageLocation === void 0
           || isLoopbackHostname(pageLocation.hostname)
 ```
 
-从域名访问时三项全不成立 → `persistence = "memory"` → Models 页读的是一份**会话内的**文档，于是报 `Loading the provider directory failed: settings are available in this browser`。**General 设置页另有一处独立但同源的门禁**（`dsh-client-ui-settings-general`）。
+从域名访问时三项全不成立 → `persistence = "memory"` → Models 页读的是一份**会话内的**文档，于是报 `settings are available in this browser`。
+
+### 0.2.1-rc.2：Models 页不再依赖这个标志
+
+0.2.1 把设置读写改成了**服务端 RPC**：`dsh-client-ui-settings` 提供 `configForms` 服务，页面通过 `remote.settings.describe()` / `remote.settings.mutate()` 读写**宿主**的 `settings.yaml`（`SettingsDescribeMirror` + `ConfigFormController`）。这条路径只受 Host/Origin 信任围栏约束，**与 origin 是不是 loopback 无关**——`settings are available in this browser` 这句话在 0.2.1 的代码里已经不存在了。
+
+`isLoopback` 只剩**一处消费者**：General 页的“设置文档动作”控制器。
+
+```js
+// dsh-client-ui-settings-general/lib/client.js
+const documentController = ctx.remote.$host.isLoopback
+  ? new SettingsDocumentStore(ctx, ctx.configForms.describe())
+  : void 0;
+```
 
 ### 本镜像怎么处理的
 
-`patch-client-settings.mjs` 把上面那条定义改成 `true`，**在构建期以 root 应用**。三条理由：
+`patch-client-settings.mjs` 仍然把连接层那条 `isLoopback` 定义改成 `true`，**在构建期以 root 应用，随后立刻 `--check` 复核**。理由：
 
-- **不需要编译源码。** 浏览器拿到的不是预构建产物：`dsh-client-modules` 是从磁盘读每个插件的 `lib/client.js`，再以 `plugins/<id>/client.js` 提供。改这个文件就是改浏览器实际执行的东西——不用编译 monorepo、不用 fork、不用每次发版 rebase。
-- **只改定义那一处，两处门禁同时生效。** 这是刻意的：`-general` 那处的周边代码在 `0.1.5-rc.1 → 0.2.0-rc.2` 之间**已经变过**（`ctx.settingsScope.describe()` → `ctx.configForms.describe()`），而定义那一行**逐字未变**。
-- **不依赖行号。** 锚点是整条表达式；匹配不到就打印「该用哪条 `grep` 去找上游的新写法」的诊断。写盘前还会用 `node --check` 校验语法，不通过就不落盘。定位也不靠猜路径：先用 Node 的解析器找 `@deepseek-ai/dsh-client-connection`，再退回**跟随符号链接**的遍历——pnpm 的 `node_modules` 全是符号链接，不跟随就什么都找不到。
+- **保留这个补丁**：General 页的文档动作是这套部署会用到的能力（导入/导出宿主设置文档），而 `isLoopback` 只是个客户端提示，把它置真不引入新的服务端信任。
+- **不用编译源码。** 浏览器拿到的不是预构建产物：`dsh-client-modules` 从磁盘读每个插件的 client bundle 并以 `/plugins/<id>/…`（combo URL）提供。改这个文件就是改浏览器实际执行的东西——不用编译 monorepo、不用 fork、不用每次发版 rebase。
+- **定位跟着包的 `exports` 走，不猜文件名。** 0.2.1 把客户端半边从 `lib/client.js` 劈成 `lib/client.browser.js` + `lib/client.node.js`，并挂到 `exports["./client"]` 上（`dsh-client-modules` 取其中的 `default`，也就是 browser 那份）。脚本现在读同一个字段，`lib/client.js` 只作为旧版本的兜底。
+- **不依赖行号。** 锚点是整条表达式；匹配不到就打印「该用哪条 `grep` 去找上游的新写法」。写盘前用 `vm.Script` 校验语法（这比 `node --check` 更贴近浏览器：后者按扩展名和最近的 `package.json` 选模块系统，都不是浏览器看这份文件的方式），不通过就不落盘。路径定位先用 Node 解析器，再退回**跟随符号链接**的遍历。
+- **补丁失败只告警、不致命**：没有它整个 GUI 照常工作，只有 General 页的文档动作缺失。
 
-补丁失败**只告警、不致命**：没有它整个 GUI 照常工作，只有 Models / General 设置页退化成 `settings are available in this browser`。
-
-> **为什么补丁必须在构建期打**（踩过的坑）：它改的文件属于 **npm 全局安装树**——`/usr/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-connection/lib/client.js`。那棵树是 **root 所有**，而容器以非特权 `DSH_UID` 运行 ⇒ 运行时写入**必然 EACCES**（实测报错：`cannot stage a file in … (EACCES)`）；而 profile 的 `node_modules` 只是**指向同一棵树的符号链接**，没有可写的副本能替代。
->
-> 所以补丁在**构建期以 root 应用**（脚本的搜索根由构建期记录的 CLI 路径推导出来，正好落在 `…/dsh/node_modules` 上）。`entrypoint.sh` 每次启动用 `--check` 复核，是为了抓「构建之后插件包被 `dsh plugin` 重装或替换」这种情况——那种情况下修法是重建镜像。
+> **为什么补丁必须在构建期打**（踩过的坑，0.2.1 更彻底）：它改的文件属于 **npm 全局安装树**——`/usr/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-connection/lib/client.browser.js`。那棵树是 **root 所有**，而容器以非特权 `DSH_UID` 运行 ⇒ 运行时写入**必然 EACCES**（实测报错：`cannot stage a file in … (EACCES)`）。0.2.1 之前 profile 的 `node_modules` 里还有指向同一棵树的符号链接；0.2.1 连这份副本都不再生成，所以**安装树里这一份就是唯一一份**。`entrypoint.sh` 每次启动用 `--check` 复核，是为了抓「构建之后插件包被 `dsh plugin` 重装或替换」这种情况——那种情况下修法是重建镜像。
 
 ### 这不是安全回退，但确实放宽了一件事
 
 `isLoopback` 是**客户端提示**，不是围栏：服务端仍然独立校验 Host/Origin 信任边界与 launch-token cookie，这个标志只决定页面编辑哪份文档。能带着有效 cookie 走到这些路由的攻击者，本来就能驱动容器内的 agent——那比读设置文档严重得多。
 
-但它确实让**远端浏览器可以读写 provider 凭据**（`settings.yaml` 里的 apiKey 字段）。这是有意识的取舍，见「安全边界」一节。
+但设置页（0.2.1 起是 `remote.settings` 本身，补丁之前是 Models 页）确实让**远端浏览器可以读写 provider 凭据**（`settings.yaml` 里的 apiKey 字段）。这是有意识的取舍，见「安全边界」一节。
 
 ### 验证
 
 ```bash
-# 启动日志里应出现：
-docker compose logs dsh | grep 'settings-UI patch'
+# 启动日志里应出现（0.2.1 起还会先打一行 dsh version）：
+docker compose logs dsh | grep -E 'dsh version|settings-UI patch'
+#   [dsh] dsh version: 0.2.1-rc.2
 #   [dsh] settings-UI patch present: the domain-served GUI edits the host document
 
-# 手工复核：应打印 `isLoopback: true ...`（路径在 $DSH_HOME/profiles 下，不在 /usr/local/lib/node_modules）
-docker compose exec dsh sh -lc \
-  'grep -n "isLoopback:" /data/dsh/profiles/node_modules/@deepseek-ai/dsh-client-connection/lib/client.js'
+# 手工复核（0.2.1 起文件叫 client.browser.js，且只在 npm 安装树里）：
+# 先定位文件，再看那一行与补丁标记
+docker compose exec dsh sh -lc '
+  f=$(find / -path "*dsh-client-connection/lib/client.browser.js" 2>/dev/null | head -1)
+  echo "$f"
+  grep -n "isLoopback:" "$f"
+  grep -c "PATCHED by dsh-docker" "$f"'     # 期望：路径 + `isLoopback: true ...` + 计数 1
 ```
 
 ### 如果补丁哪天失效了（上游改了写法）
 
-退路仍是 **loopback 源**。给 dsh 服务加回：
+补丁失效**不影响 Models 与其余设置页**（0.2.1 走 `remote.settings`）；只影响 General 页的文档动作。真要用到它时，退路仍是 **loopback 源**。给 dsh 服务加回：
 
 ```yaml
     ports:
@@ -457,8 +481,9 @@ docker compose logs caddy | grep -i -E 'certificate|obtain|error'
 
 | # | 检查 | 期望 | 不符合时 |
 |---|---|---|---|
-| 1 | `docker compose logs dsh \| grep 'settings-UI patch'` | `settings-UI patch present` | 插件包在构建后被重装/替换过 ⇒ `docker compose build && docker compose up -d` |
-| 2 | 浏览器打开 GUI → 设置 → 模型 | 列出 provider（DeepSeek 与你的自定义 provider），可编辑并保存 | 页面提示 `settings are available in this browser` ⇒ 补丁没生效，回到第 1 条 |
+| 1 | `docker compose logs dsh \| grep -E 'dsh version\|settings-UI patch'` | `dsh version: 0.2.1-rc.2` + `settings-UI patch present` | 版本不对 ⇒ `.env` 的 `DSH_VERSION` 与镜像 tag 不一致；补丁缺失 ⇒ 插件包在构建后被重装/替换过 ⇒ `docker compose build && docker compose up -d` |
+| 2 | 浏览器打开 GUI → 设置 → 模型 | 列出 provider（DeepSeek 与你的自定义 provider），可编辑并保存 | 0.2.1 起 Models 页走 `remote.settings`，不再依赖 `isLoopback`；页面若仍报旧版的 `settings are available in this browser`，说明跑的不是 0.2.1（先看第 1 条） |
+| 2b | 设置 → 通用：导出/导入设置文档 | 按钮可用（不再因域名访问而消失） | 只有这一处依赖补丁；回到第 1 条 |
 | 3 | 在模型页改一项并保存，宿主上 `git diff data/dsh/settings.yaml` | 看到 UI 的写入落到宿主文件 | `data/dsh` 不是目录挂载，或属主与 `DSH_UID` 不一致（见排障表） |
 | 4 | 让 agent 执行 `touch /etc/probe` | `[sandbox: file access denied under workspace-write mode]` | 出现 `SANDBOX_UNAVAILABLE` ⇒ 该内核没有 Landlock（启动日志里有 doctor 结论） |
 | 5 | `docker compose logs dsh \| grep 'landlock launcher'` | `full (/usr/.../landlock-run)` | `partial` = 内核 Landlock ABI 偏旧（文件效果仍受限，fail-closed）；`cannot locate` = `DSH_GLOBAL_ROOT` 指错目录 |
@@ -474,6 +499,77 @@ docker compose logs caddy | grep -i -E 'certificate|obtain|error'
 - `DSH_TRUSTED_HOSTS` 写**无端口** authority：无端口条目按主机名比较，一个条目覆盖 443 / 80 / 任意宿主端口 ✔
 - 白名单判的是**客户端出口 IP**：验证必须从客户端做 ✔（在服务器上 curl 会经 docker 网桥，得到 403 属正常）
 - **HSTS 只对域名生效**：用 IP 访问时两条路可长期并存；若以后改用域名，一旦 HTTPS 访问成功，浏览器会把 `http://域名` 强制升级一年 ⇒ 明文那条路消失（Caddyfile 里 HSTS 头旁边也写了）
+
+## 升级到 0.2.1-rc.2
+
+本仓库从 **0.2.0-rc.2** 适配到 **0.2.1-rc.2**。上游这一版动了四处会影响本部署的东西（外加一项顺带简化），下面按「症状 → 本仓库怎么处理」列清楚，便于你 review 和以后升级时复用这套方法。
+
+### 1. profile 不再把安装树投影到 `$DSH_HOME`
+
+0.2.0 的 `dsh-app-boot` 会把安装树里的包 symlink 进 `$DSH_HOME/profiles/node_modules`；0.2.1 改为**每次启动现算 runtime resolution**，profile 里只剩 `package.json` / `cordis.yml` / `cordis.patch.yml` / `node_modules`（后者只有本 entrypoint 链接的自带插件）。
+
+- 旧 home 里残留的 `profiles/node_modules/@deepseek-ai` **不再致命**（它指向同一批绝对路径，dsh 会把它当 linked root），但属于死重量。
+- entrypoint 的「投影包数 < 安装树包数」告警随之失效，已改成「发现旧投影 → 说明来历 + 给清理命令」。
+- 构建期冒烟测试的解析探针原来在 `profiles/web` 里跑，0.2.1 下那里什么都没有，已改为锚在**安装树**，并额外断言组合出的 profile 点名了 `dsh-base` + `dsh-web-app`。
+
+### 2. 客户端 bundle 换了文件名和出口
+
+`dsh-client-connection` 的浏览器半边从 `lib/client.js` 拆成 **`lib/client.browser.js`**（+ `client.node.js`），通过 `exports["./client"]` 发布；`dsh-client-modules` 取该字段的 `default` 来服务浏览器。
+
+- `patch-client-settings.mjs` 改为**读 `exports["./client"]`** 定位目标（`lib/client.js` 仅作旧版兜底），不再硬编码文件名。
+- 顺带把 `--check` 的「没打补丁」与「锚点失配」拆成两种报错：前者是正常状态（构建会打上），后者才是上游改写法。
+
+### 3. 设置页门禁只剩一处，Models 页不再依赖它
+
+0.2.1 的设置读写走服务端 RPC（`remote.settings`），`isLoopback` 只剩 General 页的文档动作在用。补丁**保留**（General 页需要），但它的说明、日志与验收口径都改了——再拿旧版的 `settings are available in this browser` 去判断会误判。
+
+### 4. `webserver` 行的 `config` 多了 `tls`
+
+0.2.1 的 web-app bundle 里这一行是：
+
+```yaml
+- id: webserver
+  config:
+    host: !!js ctx.webStartup.host ?? '127.0.0.1'
+    port: !!js ctx.webStartup.port ?? 3080
+    tls: !!js ctx.webStartup.tls
+```
+
+patch **整体替换**该行的 `config`，所以 entrypoint 生成的覆盖层必须一并重述 `tls`，否则命令行上的 `--tls-cert/--tls-key` 会被静默丢弃（实测：不加这一行，dump 出来的 config 里没有 `tls` 键）。
+
+### 5. 依赖全部精确锁版（顺带简化）
+
+0.2.1-rc.2 里约 1300 条 `@deepseek-ai/dsh-*` 依赖/peer **全部是精确版本**，不再是 `^0.2.0-rc.2` 这类预发布范围。`.env` / `Dockerfile` 里那套「必须选本系列最新版、否则预发布范围会漂」的长篇说明因此改写为「一个版本决定整棵树」，构建期版本断言保留（它现在防的是混装/去重问题，而不是漂移）。Node 下限也从 22.12 提到 **22.19**（`libreoffice-kit` 的 engines），构建期断言。
+
+### 升级操作顺序
+
+```bash
+git pull                                  # 拿到本次适配
+grep -n 'DSH_VERSION' .env                # 应为 0.2.1-rc.2
+docker compose build --no-cache dsh       # 关键：让新版本重新装 npm 树，别复用旧层缓存
+docker compose up -d
+docker compose logs -f dsh | grep -E 'dsh version|settings-UI patch|profile node_modules|bundled plugin'
+```
+
+期望日志（首启）：
+
+```
+[dsh] dsh version: 0.2.1-rc.2
+[dsh] profile node_modules: no installation projection (expected on 0.2.1+)
+[dsh] bundled plugin @local/dsh-file-download: enabled
+[dsh] bundled plugin dsh-minimax-h3: enabled
+[dsh] bundled plugin @local/dsh-login-gate: enabled, options in /data/dsh/cordis.patch.yml
+[dsh] settings-UI patch present: the domain-served GUI edits the host document
+```
+
+如果打出了 `found N leftover package link(s) in /data/dsh/profiles/node_modules/@deepseek-ai`，按提示清一次（不影响启动，只是把 0.2.0 的残留去掉）：
+
+```bash
+rm -rf data/dsh/profiles/node_modules && docker compose restart dsh
+```
+
+> **升级前先备份 `./data/dsh`**（`tar czf dsh-home-$(date +%F).tgz -C data/dsh .`）。会话格式在 0.2.1 是 **v4**，安装树里带着 `dsh-session-format-v3-to-v4` 的迁移插件：升级时旧会话会被向前迁移，这种迁移不保证可逆，回滚到更旧的 dsh 版本可能读不了迁移后的会话。设置文档（`settings.yaml`）与会话是分开的，回滚它没有这个问题。
+
 ## 常用运维
 
 ```bash
@@ -482,9 +578,12 @@ docker compose restart dsh                 # 重启（会生成新的登录 toke
 docker compose down                        # 停止（数据保留在 ./data/dsh）
 docker compose down -v                     # 停止并删除 Caddy 数据卷（CA 会重新生成；./data/dsh 不受影响）
 
-# 升级 dsh 版本
-#   改 .env 里的 DSH_VERSION，然后：
-docker compose build --pull && docker compose up -d
+# 升级 dsh 版本（完整步骤见「升级到 0.2.1-rc2」）
+#   1) 改 .env 里的 DSH_VERSION
+#   2) 重建 dsh 服务，别复用旧层缓存（npm 全局树必须重新装）
+docker compose build --no-cache dsh && docker compose up -d
+#   3) 看这几行：dsh version / profile node_modules / bundled plugin / settings-UI patch
+docker compose logs dsh | grep -E 'dsh version|profile node_modules|bundled plugin|settings-UI patch'
 
 # 备份（会话/设置/凭据都在 ./data/dsh，直接打包目录即可）
 tar czf "dsh-home-$(date +%F).tgz" -C data/dsh .
@@ -512,7 +611,7 @@ docker compose exec dsh dsh plugin --profile web remove <package>
 
 > ℹ️ 会话日志上传在这条链路上是**默认关闭**的，不必额外处理。可核实的依据：`dsh-session-log-deepseek` 的 schema 是 `enabled: z.boolean().default(false)`，其 `apply` 在 `enabled !== true` 时直接返回，而 base bundle 插入该行时没有给任何 config。
 >
-> 注意：仓库 master 上的 CLI 参考写的却是「default-on DeepSeek session-log upload」，与 `0.1.5-rc.x` 实际行为矛盾（很可能 master 已经演进）。**升级 `DSH_VERSION` 后请重新核对一次**：确认方式是 `docker compose exec dsh dsh plugin --profile web why @deepseek-ai/dsh-session-log-deepseek` 之外，直接看启动后的 `dsh web --dump-config | grep -A2 session-log-deepseek`，如果出现 `enabled: true`，就在 `$DSH_HOME/profiles/web/cordis.patch.yml` 里把它改回 `false`（该文件初始内容是 `[]`，编辑时要**替换**它而不是追加）。
+> **0.2.1-rc.2 已重新核对**：`dsh web --dump-config` 里这一行仍然只有 `id` + `name`、没有 `config`，即默认关闭——与 `0.1.5-rc.x` 的实测一致（仓库 master 的 CLI 参考写「default-on」，与实际行为矛盾，以 dump 为准）。再升级后照旧核对一次：如果出现 `enabled: true`，就在 `$DSH_HOME/profiles/web/cordis.patch.yml` 里把它改回 `false`（该文件初始内容是带注释的 `[]`，编辑时要**替换**它而不是追加）。
 
 ## 排障
 
@@ -535,9 +634,9 @@ docker compose exec dsh dsh plugin --profile web remove <package>
 | 改了 `DSH_BIND_PORT` 后不通 | `DSH_UPSTREAM` 会跟着变，检查 `docker compose config` 里 caddy 的 `DSH_UPSTREAM` 与 healthcheck。 |
 | 流式响应「卡住」直到最后才一次性吐完 | 检查是否有中间件在缓冲 SSE：`Caddyfile` 的 site 块必须有 `flush_interval -1`（少了它，GUI 的事件流会被攒到最后才发）。 |
 
-| `plugin(s) failed to load: @deepseek-ai/dsh-sandbox-local; could not be resolved`（并伴随重启循环）| **profile 的投影过期/残缺**。`$DSH_HOME/profiles` 是 dsh 启动时用 pnpm 装的，装一半就会这样。先看宿主侧（A2 之后状态就在眼前）：`ls data/dsh/profiles/node_modules/@deepseek-ai \| wc -l`（完整约 250）。`$DSH_HOME/profiles/node_modules` 是 dsh 启动时从**安装树**投影出来的，profile 自身没有依赖，所以**没有任何东西会重建它**。对照包数：`ls data/dsh/profiles/node_modules/@deepseek-ai | wc -l`（完整应与安装树同量级，约 250）。修法：`rm -rf data/dsh/profiles/node_modules && docker compose restart dsh`。**chown 不管用**（坏的是内容）。若**全新 home 首启**就失败，则是镜像本身有问题——看构建期冒烟测试的输出。 |
+| `plugin(s) failed to load: @deepseek-ai/dsh-sandbox-local; could not be resolved`（并伴随重启循环）| **0.2.0 及更早**的典型症状：`$DSH_HOME/profiles/node_modules` 里那份从安装树投影出来的符号链接农场过期/残缺，而 profile 自身没有依赖，所以没有任何东西会重建它。0.2.1 起这种投影**不再产生**，该目录只剩 entrypoint 链接的自带插件，因此这条错误若在 0.2.1 上出现，指向的是**镜像里的安装树**（构建期断言本应拦住）或**日志里点名的那个包被 `dsh plugin` 动过**。先看启动日志的 `dsh version` 与 `profile node_modules` 两行：<br>• 有 `found N leftover package link(s)` ⇒ 清一次：`rm -rf data/dsh/profiles/node_modules && docker compose restart dsh`；<br>• 版本与 `.env` 不符 ⇒ `docker compose build --no-cache dsh`；<br>• 全新 home 首启就失败 ⇒ 镜像本身有问题，看构建期冒烟测试的输出。 |
 
-| 构建期 `ERESOLVE could not resolve`，或启动报 `plugin(s) failed to load: … could not be resolved` | **预发布版本漂移**。dsh 各包之间用 `^0.1.5-rc.1` 这类范围互相依赖，而 npm 会解析到**该范围里最新的预发布版**：CLI 停在 rc.1，`dsh-base` 却浮到 rc.3，树变成 rc.1/rc.3 混装 ⇒ 部分插件包不在安装树**顶层** ⇒ dsh 的 profile 投影看不到它 ⇒ 启动必失败（而 `--dump-config` 只组合配置、不 import 模块，所以自检照样通过）。**规则：`DSH_VERSION` 用该系列里最新的那个**——范围没有更新的可浮，自然就稳定（semver 还会把 `^0.1.5-rc.3` 限制在 0.1.5 tuple 内，`0.1.6-alpha.x` 进不来）。构建期的版本断言会点名漂移的包。<br>另外两点实测事实：**显式 pin 的包落在 npm 全局根**（`/usr/lib/node_modules/@deepseek-ai/`），而 **CLI 的依赖嵌套在它旁边**（`.../dsh/node_modules/@deepseek-ai/`）——Node 两处都能解析（全局根本身就是祖先 `node_modules` 目录），所以构建期断言**两处都查**（这一点曾被断言误报为 missing，构建日志里那 209 个包就是嵌套树）。 |
+| 构建期 `ERESOLVE could not resolve`，或启动报 `plugin(s) failed to load: … could not be resolved` | **安装树混装**。0.2.1-rc.2 的 `@deepseek-ai/dsh-*` 依赖全部是精确版本，所以「预发布范围漂移」这个老原因已经不存在了；现在剩下的成因是：`.env` 的 `DSH_VERSION` 与镜像 tag 不一致、构建复用了旧的 `node_modules` 层、或 npm 在全局根目录多放了一份同名包。构建期的版本断言会点名版本不符的包。<br>两点实测事实仍然成立：**显式 pin 的包可能落在 npm 全局根**（`/usr/lib/node_modules/@deepseek-ai/`），而 **CLI 的依赖会嵌套在它旁边**（`.../dsh/node_modules/@deepseek-ai/`）——Node 两处都能解析（全局根本身是祖先 `node_modules` 目录），所以构建期断言**两处都查**（这一点曾被断言误报为 missing）。 |
 
 ## 安全边界（务必知悉）
 
@@ -566,22 +665,25 @@ docker compose exec dsh dsh plugin --profile web remove <package>
    该路径顺带确认了全局安装的布局：`npm i -g` 把依赖嵌套在 `@deepseek-ai/dsh/node_modules/` 下，而不是提升到全局根目录。
 6. `dsh` 容器能以配置的 `DSH_UID:DSH_GID`（本部署为 10001）启动，`dsh web` 打印出带 token 的登录 URL。
 
-7. **设置页补丁**（2026-10，本地对 `0.2.0-rc.2` 实测）：补丁生效、幂等、`--check` 通过、`node --check` 语法校验通过、旧表达式归零；两处门禁读同一个定义，所以只改一处就够。**rc.1 容器上的锚点匹配仍需一次构建确认**。
+7. **设置页补丁**（2026-10，对 `0.2.0-rc.2` 实测）：补丁生效、幂等、`--check` 通过、语法校验通过、旧表达式归零。
+
+8. **0.2.1-rc.2 适配**（2026-10-26，本机对着真实 `@deepseek-ai/dsh@0.2.1-rc.2` 安装实测，Windows + Node 24，非容器）：`--profile web --dump-config` 能组合；`dsh web` 从空 home 启动并常驻，`GET /` 无 cookie 401、`/api/*` 无 cookie 401、错误 Host 直连 `/api` 403（与 `verify.sh` 的期望一致）；`profiles/web` 只有 `package.json` / `cordis.yml` / `cordis.patch.yml`，**没有** `profiles/node_modules`；三个自带插件按 entrypoint 的方式链接 + 注入 HOME patch 后出现在组合树里，浏览器 combo bundle 返回 200 且包含它们；补丁脚本对 `lib/client.browser.js` 的锚点匹配、写入、幂等、`--check` 全部通过；entrypoint 的覆盖层带上 `tls` 后 dump 结果里 `tls` 仍在；构建期那套「Node 解析 + 版本比对」断言与插件校验循环，也用本机安装实跑过（9 个包全部解析到 0.2.1-rc.2，无 missing/mismatch）。**容器内**（Linux/landlock/root-vs-uid 权限）仍需一次真实构建确认。
 
 ### 仍待确认（部署侧动作，不是未知项）
 
 1. **属主**：宿主目录属于别的 uid（实测 10001）时，最省事的是把 `.env` 的 `DSH_UID/DSH_GID` 设成该属主——构建参数会把它带进镜像，`./data/dsh` 这个宿主目录再 chown 一次即可。entrypoint 会打印实际属主与两种修法。
 2. 首次浏览器访问的证书信任：本项目已决定**接受自签警告、点一次继续**（前提是受管浏览器未禁用 `SSLErrorOverrideAllowed`）。
-3. **本轮改动需要一次构建验证**：Dockerfile / entrypoint 以 Linux 上已跑通的版本为基线，本轮新增的是「启动期补丁」与 python_server 相关删除，因此要在服务器上 `docker compose build` 一次。构建期会跑补丁断言与 `--profile web --dump-config`，失败点都落在构建阶段，而不是首次打开页面时。
+3. **本轮 0.2.1 适配需要一次构建验证**：构建期会跑 Node 版本下限断言、安装树完整性/版本断言、设置页补丁 `--check`、`--profile web --dump-config`，以及从空 home 的 60 秒启动冒烟；失败点都落在构建阶段，而不是首次打开页面时。
+4. **三个自带插件的运行时功能**：0.2.1 下它们都能加载、能被组合进浏览器图，但登录门禁的表单渲染、文件下载的路由、MiniMax H3 的 ComfyUI 调用属于浏览器交互或外部服务，需要你在有 Docker 的环境里点一遍（`README` 的验收清单第 7～9 条附近）。它们用的服务（`webServer`、`webserver/index-inject`、`ctx.connection.fetch.register`、`ctx.fs.readByteRange`、`ctx.workspaceChanges`、`ctx.sandboxPolicy`、`ctx.sessionQuery`）都还在 0.2.1 的安装树里。
 
 ## 内置插件（`plugins/` 目录）
 
 `plugins/` 下的**每个目录**都会在构建期被复制到镜像的 `/opt/dsh-plugins`，并在**容器启动时自动启用**：
 
-- 插件必须是 dsh 的 **bundle**：`package.json` 有可解析的 `name`、入口文件存在、声明了 `dsh.bundle.patch` 时该 patch 文件也存在。**构建期逐项校验，不符合即构建失败**（坏插件进不了镜像）。
+- 插件必须是 dsh 的 **bundle**：`package.json` 有可解析的 `name`、入口文件存在、声明了 `dsh.bundle.patch` 时该 patch 文件（一个或**一串**，0.2.1 支持数组）也存在。**构建期逐项校验，不符合即构建失败**（坏插件进不了镜像）。
 - **为什么启用发生在启动期而不是构建期**：profile 是 dsh **首次启动时才组合出来**的，构建期不存在。启动脚本因此做两件事：
-  1. 把包**软链**进 `$DSH_HOME/profiles/node_modules/`，让组合树里的插件行能解析到它。这个链接**不会被 dsh 的投影清理删掉**——`removeLinkProjections` 只删指向 `<profile>/.dsh-module-fallback` 的链接，其余符号链接保留；
-  2. 把该 bundle 自带的 patch 层**追加进 `$DSH_HOME/cordis.patch.yml`**（home 级 patch，覆盖所有 profile，所以**首次启动就生效**）。追加**只做一次**：之后你在那里改的选项（例如登录门禁的账号密码）不会被后续启动覆盖。
+  1. 把包**软链**进 `$DSH_HOME/profiles/node_modules/`，让组合树里的插件行能解析到它。0.2.1 起这正是 dsh 认的 **linked root**：`linkedProfileRoots` 收集所有指向 profiles 树之外的符号链接并按包名登记，启动过程中不会删它们（`removeLinkProjections` 只清 ≤0.2.0 的 `.dsh-module-fallback` 农场），entrypoint 每次启动 `ln -sfn` 重建；
+  2. 把该 bundle 自带的 patch 层（数组则按声明顺序拼接）**追加进 `$DSH_HOME/cordis.patch.yml`**（home 级 patch，覆盖所有 profile，所以**首次启动就生效**）。追加**只做一次**：之后你在那里改的选项（例如登录门禁的账号密码）不会被后续启动覆盖。
 - **改选项**：编辑 `data/dsh/cordis.patch.yml` 里对应插件的段落 → `docker compose restart dsh`。
 - **运行时加插件（不重建镜像）**：把宿主目录挂进容器，并把 `DSH_PLUGIN_ROOT` 指向它。
 

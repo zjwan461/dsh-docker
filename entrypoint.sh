@@ -96,6 +96,13 @@ resolve_dsh() {
 
 resolve_dsh
 log "dsh CLI: ${DSH_KIND}"
+# The installed version is worth a log line of its own: this image pins one exact
+# release, every @deepseek-ai/dsh-* dependency is pinned exactly in 0.2.x, and a
+# support question ("which build is running?") starts here.
+dsh_pkg_dir="$(dirname "$(dirname "${DSH_CMD[1]:-${DSH_CMD[0]}}")")"
+if [[ -f "${dsh_pkg_dir}/package.json" ]]; then
+  log "dsh version: $(node -p "require('${dsh_pkg_dir}/package.json').version" 2>/dev/null || echo 'unknown')"
+fi
 if [[ "$DSH_KIND" == *FALLBACK* ]]; then
   warn "the npm dsh CLI could not be found in any known location, so a bare"
   warn "'dsh' from PATH will be used. If that resolves to something else — a"
@@ -168,58 +175,54 @@ if [[ -n "${DSH_BUNDLED_SKILL_DIR:-}" ]]; then
   fi
 fi
 
-# ── 1c. profile projection ──────────────────────────────────────────────────
+# ── 1c. profile node_modules ────────────────────────────────────────────────
 #
 # The profile's package.json declares NO dependencies (`dependencies: {}`): its
-# plugin set is named by `dsh.profile.bundles` and materialised at boot as a
-# PROJECTION of the installation's own packages into
-# $DSH_HOME/profiles/node_modules. Nothing needs the npm registry at runtime, so
-# there is nothing to pre-install — `dsh plugin --profile web install` is a no-op
-# ("Already up to date"), which is worth knowing before trying to debug this.
+# plugin set is named by `dsh.profile.bundles` (web = dsh-base + dsh-web-app).
+# Nothing needs the npm registry at runtime, so `dsh plugin --profile web install`
+# is a no-op ("Already up to date") — worth knowing before trying to debug this.
 #
-# What IS dangerous is a projection inherited from an older home. A home migrated
-# with `cp -a` keeps the previous owner and can carry a partial or
-# older-generation projection. It SHADOWS the installation, and because the
-# profile declares no dependencies dsh has nothing to reinstall, so plugin loading
-# fails on every restart with
-#   plugin(s) failed to load: @deepseek-ai/dsh-sandbox-local; could not be resolved
-# Fixing permissions does not help: the CONTENT is wrong, and nothing rebuilds it.
+# HOW THE INSTALLATION REACHES THE PROFILE CHANGED IN 0.2.1-rc.2:
 #
-# Verifying completeness would need the bundles' dependency closure, which is not
-# knowable from bash, so this does not delete anything — it reports the shape and
-# prints the one command that fixes it.
+#   ≤ 0.2.0-rc.2  dsh SYMLINKED every installation package into
+#                 $DSH_HOME/profiles/node_modules (`<profile>/.dsh-module-fallback`
+#                 was the bookkeeping directory). A home carried over from an older
+#                 image therefore held a whole stale copy of that farm, it shadowed
+#                 the installation, and nothing ever rebuilt it.
+#
+#   0.2.1-rc.2    no projection at all. `dsh-app-boot` computes a runtime
+#                 resolution from the installation tree at every start and hands
+#                 it to Node's ESM/CJS resolvers; the profile keeps only
+#                 cordis.yml / cordis.patch.yml / package.json / node_modules.
+#
+# So from 0.2.1 on, `profiles/node_modules` contains ONLY what this entrypoint
+# links (step 1d). dsh treats those as "linked roots" and registers them by
+# package name, which is the supported way to add an out-of-tree bundle.
+#
+# A `profiles/node_modules/@deepseek-ai` directory therefore means the home was
+# last used by a 0.2.0-or-older image. Its links resolve into the CURRENT
+# installation at the same absolute paths, so they are not fatal — but they are
+# dead weight, they are the thing that used to break boot, and they hide which
+# generation the home belongs to. Report it; delete it only on the host.
 PROJECTION="${DSH_HOME}/profiles/node_modules/@deepseek-ai"
-dsh_bin="$(cat "${DSH_NPM_BIN_DISCOVERY_FILE:-/tmp/dsh-npm-bin.path}" 2>/dev/null || true)"
-INSTALLATION=""
-if [[ -n "$dsh_bin" ]]; then
-  INSTALLATION="$(dirname "$(dirname "$dsh_bin")")/node_modules/@deepseek-ai"
-fi
 # `ls` exits 2 when the directory is absent, and `set -euo pipefail` turns that
 # into an instant, silent death here — which is exactly what this step must never
-# do, because "no projection yet" is the NORMAL state on a fresh home or right
-# after somebody drops it. Guard with -d instead of silencing the message.
+# do, because "no projection" is the NORMAL state now. Guard with -d.
 projected=0
 if [[ -d "$PROJECTION" ]]; then
-  projected="$(ls -1 "$PROJECTION" | wc -l)"
+  projected="$(ls -1 "$PROJECTION" 2>/dev/null | wc -l)"
 fi
-installed=0
-if [[ -n "$INSTALLATION" && -d "$INSTALLATION" ]]; then
-  installed="$(ls -1 "$INSTALLATION" | wc -l)"
-fi
-if [[ "$projected" -eq 0 ]]; then
-  log "no profile projection yet: dsh builds it during this start"
-elif [[ "$installed" -gt 0 && "$projected" -lt "$installed" ]]; then
-  warn "the profile projection has $projected packages while the installation supplies $installed."
-  warn "A partial projection shadows the installation and breaks plugin loading with"
-  warn "  plugin(s) failed to load: ... could not be resolved"
-  warn "Permissions are not the problem — the CONTENT is, and nothing rebuilds it because"
-  warn "the profile declares no dependencies. Drop it and let dsh project it again:"
-  warn "  rm -rf ${DSH_HOME}/profiles/node_modules && docker compose restart dsh"
-  warn "BACK IT UP FIRST — this container has no npm registry access, so if dsh"
-  warn "  cannot rebuild the projection you must restore the directory to boot:"
-  warn "  cp -a ${DSH_HOME}/profiles/node_modules ${DSH_HOME}/profiles/node_modules.bak"
-elif [[ "$projected" -gt 0 ]]; then
-  log "profile projection present ($projected packages)"
+if [[ "$projected" -gt 0 ]]; then
+  warn "found ${projected} leftover package link(s) in ${PROJECTION}."
+  warn "That is a 0.2.0-or-older profile projection: this dsh (0.2.1+) does not create"
+  warn "one, and the profile's own plugin set is resolved from the installation tree."
+  warn "The links now point into the new installation, so boot works — but the directory"
+  warn "is dead weight and is exactly what used to break plugin loading after an upgrade."
+  warn "Remove it on the HOST (this container has no npm registry access, but it does not"
+  warn "need one: dsh rebuilds nothing there, and this entrypoint re-links its own plugins)."
+  warn "  rm -rf <repo>/data/dsh/profiles/node_modules && docker compose restart dsh"
+else
+  log "profile node_modules: no installation projection (expected on 0.2.1+)"
 fi
 
 # ── 1d. bundled plugins ─────────────────────────────────────────────────────
@@ -229,13 +232,20 @@ fi
 # because a profile only exists once dsh has composed it:
 #
 #   1. the package must resolve, so it is linked into the profile's
-#      node_modules. dsh's own link projection leaves that link alone:
-#      removeLinkProjections only unlinks symlinks whose target lies inside
-#      <profile>/.dsh-module-fallback, and "every other symlink stays";
+#      node_modules. Since 0.2.1-rc.2 that is also the ONLY thing in there: the
+#      installation no longer projects itself, and `dsh-app-boot` registers every
+#      symlink that points outside the profiles tree as a "linked root" by package
+#      name. Nothing unlinks these during boot (removeLinkProjections only removes
+#      the `≤0.2.0` `.dsh-module-fallback` farm), and step 1d re-creates them with
+#      `ln -sfn` on every start, so a stale target cannot survive a restart;
 #   2. its patch layer must be composed, so it is appended to the HOME-level
 #      patch file ($DSH_HOME/cordis.patch.yml), which applies over every
 #      profile's layer — that is what makes the plugin present on the very first
 #      start, before any profile exists.
+#
+# `dsh.bundle.patch` is one path OR an ordered list of paths (0.2.1-rc.2's own
+# dsh-web-app declares a list), so both shapes are handled: the seed is the
+# concatenation of the declared files, in order — the same order dsh applies them.
 #
 # The layer is seeded ONCE per plugin. Whatever you edit there afterwards — the
 # login gate's account and password, for instance — survives every later start,
@@ -263,24 +273,42 @@ if [[ -d "$PLUGIN_ROOT" ]]; then
       ln -sfn "$plugin_dir" "${DSH_HOME}/profiles/node_modules/${plugin_name}"
     fi
 
-    plugin_patch="$(node -p "require('${plugin_manifest}').dsh?.bundle?.patch ?? ''" 2>/dev/null || true)"
-    if [[ -n "$plugin_patch" && -f "${plugin_dir}/${plugin_patch}" ]]; then
-      if grep -qF "# bundled plugin: ${plugin_name}" "$HOME_PATCH" 2>/dev/null; then
+    # `dsh.bundle.patch` may be a string or an ordered array of strings. Print one
+    # path per line so bash can loop over both shapes identically.
+    plugin_patches="$(node -p "const p = require('${plugin_manifest}').dsh?.bundle?.patch; Array.isArray(p) ? p.join('\n') : (p ?? '')" 2>/dev/null || true)"
+    if [[ -n "$plugin_patches" ]]; then
+      missing_patch=""
+      while IFS= read -r one_patch; do
+        [[ -n "$one_patch" ]] || continue
+        if [[ ! -f "${plugin_dir}/${one_patch}" ]]; then
+          missing_patch="$one_patch"
+          break
+        fi
+      done <<<"$plugin_patches"
+      if [[ -n "$missing_patch" ]]; then
+        warn "bundled plugin ${plugin_name} declares patch ${missing_patch}, which does not exist in ${plugin_dir}; skipped. Rebuild the image: the build validates this."
+      elif grep -qF "# bundled plugin: ${plugin_name}" "$HOME_PATCH" 2>/dev/null; then
         log "bundled plugin ${plugin_name}: enabled"
       else
         {
           printf '\n# --- bundled plugins (seeded once by entrypoint.sh; edit freely) ---\n'
           printf '# bundled plugin: %s\n' "$plugin_name"
-          cat "${plugin_dir}/${plugin_patch}"
+          while IFS= read -r one_patch; do
+            [[ -n "$one_patch" ]] || continue
+            cat "${plugin_dir}/${one_patch}"
+          done <<<"$plugin_patches"
         } >> "$HOME_PATCH"
         log "bundled plugin ${plugin_name}: enabled, options in ${HOME_PATCH}"
       fi
-      if grep -qiE '^[[:space:]]*(password|passwd|secret|token):' "${plugin_dir}/${plugin_patch}"; then
-        warn "bundled plugin ${plugin_name} ships a credential among its options."
-        warn "  The seeded copy in ${HOME_PATCH} is what runs — change it there, then"
-        warn "  restart dsh. Its defaults are public: anyone who can load the page can"
-        warn "  read the values the gate compares against."
-      fi
+      while IFS= read -r one_patch; do
+        [[ -n "$one_patch" ]] || continue
+        if grep -qiE '^[[:space:]]*(password|passwd|secret|token):' "${plugin_dir}/${one_patch}"; then
+          warn "bundled plugin ${plugin_name} ships a credential among its options."
+          warn "  The seeded copy in ${HOME_PATCH} is what runs — change it there, then"
+          warn "  restart dsh. Its defaults are public: anyone who can load the page can"
+          warn "  read the values the gate compares against."
+        fi
+      done <<<"$plugin_patches"
     fi
     plugin_total=$((plugin_total + 1))
   done
@@ -355,8 +383,18 @@ fi
 # ── 3. overlay ──────────────────────────────────────────────────────────────
 #
 # A patch replaces the targeted row's whole `config`, so every key the row owns
-# is restated here. `port` keeps the `!!js` expression from the bundle layer so
-# that a `--port` app argument still wins over this default.
+# has to be restated here — including the ones this deployment never sets.
+#
+# 0.2.1-rc.2 added `tls: !!js ctx.webStartup.tls` to the webserver row (the flag
+# family grew --tls-cert/--tls-key). Omitting it here would not fail the boot: it
+# would silently DROP a TLS configuration supplied on the command line, because
+# the overlay's config replaces the bundle's. It stays an expression, so the
+# normal case (no --tls-* flags → undefined → plain HTTP behind Caddy) is
+# unchanged, and the flags keep working if somebody fronts this container
+# directly.
+#
+# `host`/`port` keep the `!!js` expressions from the bundle layer so that a
+# `--port` app argument still wins over the default.
 
 cat >"$OVERLAY" <<EOF
 # Generated by /usr/local/bin/dsh-entrypoint at $(date -u +%Y-%m-%dT%H:%M:%SZ).
@@ -370,6 +408,7 @@ cat >"$OVERLAY" <<EOF
   config:
     host: ${BIND_HOST}
     port: !!js ctx.webStartup.port ?? ${BIND_PORT}
+    tls: !!js ctx.webStartup.tls
     compression: gzip
     compressionLevel: 1
     compressionThresholdBytes: 1024
@@ -397,19 +436,25 @@ fi
 # ── 3b. deployment patch: settings UI on a remote origin ────────────────────
 #
 # The image applies this patch at BUILD time, as root, because the file it
-# rewrites lives in the root-owned npm global installation and the profile's
-# node_modules is a symlink farm pointing back into it — so a runtime attempt can
-# only ever fail with EACCES. This is therefore a verification, not an apply: it
-# catches a plugin package that was reinstalled (e.g. by `dsh plugin`) after the
-# build, and the fix for that is a rebuild.
+# rewrites lives in the root-owned npm global installation — and since 0.2.1-rc.2
+# there is no profile copy of it either (the installation no longer projects
+# itself), so a runtime attempt can only ever fail with EACCES. This is therefore
+# a verification, not an apply: it catches a plugin package that was reinstalled
+# (e.g. by `dsh plugin`) after the build, and the fix for that is a rebuild.
+#
+# What it buys, on 0.2.1-rc.2: the General page's settings-DOCUMENT actions keep
+# working through the domain. The Models page no longer depends on this flag — it
+# reads and writes the host document through `remote.settings`, which works on
+# any origin the trust fence admits.
 PATCH_TOOL=/usr/local/bin/dsh-patch-client-settings.mjs
 if [[ -r "$PATCH_TOOL" ]]; then
   if node "$PATCH_TOOL" --check --quiet; then
     log "settings-UI patch present: the domain-served GUI edits the host document"
   else
     warn "the settings-UI patch is NOT present in this image's plugin tree, so the"
-    warn "Models and General settings pages will report 'settings are available in"
-    warn "this browser' when the GUI is opened through the domain."
+    warn "General settings page loses its document import/export actions when the GUI"
+    warn "is opened through the domain. (Models and the other pages are unaffected on"
+    warn "0.2.1+: they go through remote.settings, not through this flag.)"
     warn "The patch is applied during the image build; seeing this means the plugin"
     warn "package was reinstalled or replaced afterwards. Rebuild to restore it:"
     warn "  docker compose build && docker compose up -d"
@@ -450,9 +495,16 @@ ARGS=("$SUBCMD" "--patch" "$OVERLAY")
 if [[ "${DSH_OPEN_BROWSER:-0}" != "1" ]]; then
   ARGS+=("--no-open")
 fi
+# `--trusted-host <authority...>` is a REPEATABLE variadic option in 0.2.1-rc.2:
+# one flag per authority accumulates, which is also what a single-value version
+# of the flag would read (last wins), so this shape is safe either way. Authority
+# order matters only for readability; the fence compares a set.
 for host in "${TRUSTED[@]}"; do
   ARGS+=("--trusted-host" "$host")
 done
+# Extra app arguments go LAST, and must stay option-shaped. A bare positional
+# after a variadic `--trusted-host` would be swallowed by it (commander only ends
+# a variadic list at the next `-`-prefixed token).
 ARGS+=("$@")
 
 log "sandbox mode: ${DSH_PERMISSION_MODE:-workspace-write} (deployment default)"

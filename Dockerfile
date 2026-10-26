@@ -17,8 +17,11 @@
 #     the official node image ALREADY has a uid-1000 `node` user (that leaves the
 #     runtime uid with no writable $HOME whenever DSH_UID != 1000).
 #
-#   * Node.js 22 comes from NodeSource. Node >= 22.12 is mandatory: the CLI
-#     depends on commander@15, whose engines field is ">=22.12.0".
+#   * Node.js 22 comes from NodeSource. Node >= 22.19 is mandatory in 0.2.1-rc.2:
+#     `@deepseek-ai/libreoffice-kit` (pulled in by the web profile) declares
+#     engines.node ">=22.19.0", and commander@15 needs >= 22.12. NodeSource's
+#     22.x line is past both, and the build asserts the version instead of
+#     trusting that.
 #
 #   * bubblewrap is deliberately NOT installed. On Linux the sandbox chain is
 #     ["bwrap", "landlock"] and is probed in that order; bwrap inside a
@@ -29,12 +32,12 @@
 #     is loud, never silent.
 #
 # Build (context is the repository root):
-#   docker build -t dsh:0.1.5-rc.3 .
+#   docker build -t dsh:0.2.1-rc.2 .
 
 FROM python:3.11-slim-bookworm
 
 ARG NODE_MAJOR=22
-ARG DSH_VERSION=0.1.5-rc.3
+ARG DSH_VERSION=0.2.1-rc.2
 ARG DSH_UID=1000
 ARG DSH_GID=1000
 # Absolute path of the npm dsh CLI entry file. Deliberately NOT set here: the
@@ -242,11 +245,19 @@ RUN set -eux; \
 # ── Node.js 22 ──────────────────────────────────────────────────────────────
 # The NodeSource setup script imports its signing key itself (dearmor), so no
 # gnupg package is required on the image.
+#
+# The version assertion is not decoration. 0.2.1-rc.2 pulls
+# `@deepseek-ai/libreoffice-kit` into the web profile, whose engines field is
+# ">=22.19.0"; on an older 22.x the profile still composes but that package's
+# code (and anyone reading its engines field) disagrees with the runtime. Assert
+# the floor here, where the failure is one line instead of a plugin error later.
 RUN curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" -o /tmp/nodesource_setup.sh \
  && bash /tmp/nodesource_setup.sh \
  && rm -f /tmp/nodesource_setup.sh \
  && apt-get install -y --no-install-recommends nodejs \
- && rm -rf /var/lib/apt/lists/*
+ && rm -rf /var/lib/apt/lists/* \
+ && node --version \
+ && node -e 'const [major, minor] = process.versions.node.split(".").map(Number); if (major < 22 || (major === 22 && minor < 19)) { console.error(`ERROR: node ${process.versions.node} is below the 22.19 floor this dsh release needs (@deepseek-ai/libreoffice-kit engines.node)`); process.exit(1); } console.log("node meets the 22.19 floor");'
 
 # ── dsh CLI + pnpm ──────────────────────────────────────────────────────────
 # pnpm is required because `dsh plugin --profile <name> <args>` forwards to it.
@@ -254,19 +265,17 @@ RUN curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" -o /tmp/nodeso
 # `@deepseek-ai/dsh-session-title-llm` is installed EXPLICITLY even though
 # nothing lists it as a regular dependency. The real chain is:
 #
-#     @deepseek-ai/dsh -> @deepseek-ai/dsh-base
+#     @deepseek-ai/dsh -> @deepseek-ai/dsh-session-title-llm[peer of:]
 #                      -> @deepseek-ai/dsh-session-title-first-prompt-llm
-#                      -> peerDependencies: @deepseek-ai/dsh-session-title-llm
 #
-# A peer dependency is the consumer's job to provide, and npm does not reliably
-# put this one in the global tree. When it is absent, `dsh web` aborts while
-# composing the `web` profile with ERR_MODULE_NOT_FOUND for
-# '@deepseek-ai/dsh-session-title-llm'. Installing it at the top level places it
-# where Node's resolver finds it from the nested plugin.
+# i.e. a nested plugin peer-depends on it (exactly `0.2.1-rc.2` since 0.2.1).
+# npm >= 7 installs peers itself, so this line is belt-and-braces: it makes the
+# tree independent of npm's peer behaviour and of `--legacy-peer-deps`, and when
+# the package IS deduped there is still exactly one copy on disk.
 #
 # The version MUST stay pinned to DSH_VERSION: this package's `latest` dist-tag
-# is 0.0.1-rc.1, so an unpinned name would fetch a stale release that does not
-# match the CLI, and `next` is 0.1.5-rc.2, so it would also drift ahead.
+# is 0.0.1-rc.1 — a stale release that does not match the CLI — so an unpinned
+# name would install the wrong thing.
 RUN npm install --global --no-fund --no-audit \
       "@deepseek-ai/dsh@${DSH_VERSION}" \
       "@deepseek-ai/dsh-session-title-llm@${DSH_VERSION}" \
@@ -287,15 +296,18 @@ RUN npm install --global --no-fund --no-audit \
 #                                                          entry lives in a WeakMap
 #                                                          keyed by the root context)
 #
-# Prerelease float is defeated by CHOOSING THE NEWEST RELEASE OF ITS LINE instead:
-# a range can only float when a newer release exists, and semver keeps
-# `^0.2.0-rc.2` inside the 0.2.0 tuple, so 0.2.1-alpha.x cannot be pulled in. See
+# FLOAT ITSELF IS GONE in 0.2.1-rc.2: every one of the ~1300 intra-family
+# dependency and peer entries is an EXACT version (`"@deepseek-ai/dsh-base":
+# "0.2.1-rc.2"`), not a `^0.2.x-rc.y` range. So the tree is deterministic for a
+# given DSH_VERSION, and the assertion further down exists to catch the two things
+# that can still go wrong: an npm that skips the linux-x64 optional dependency,
+# and a duplicate copy at two locations. Choosing the newest release of its line
+# is still the right rule for a line that DOES use ranges (0.1.5.x, 0.2.0.x); see
 # the DSH_VERSION note in .env.example.
 #
 # The @deepseek-ai/dsh-session-title-llm pin above stays for an unrelated reason:
 # its `latest` dist-tag is a stale 0.0.1-rc.1, so leaving it unpinned would fetch a
-# release that does not match the CLI. That one is a peer of a nested plugin, so
-# installing it at the top level is what makes it resolvable at all.
+# release that does not match the CLI.
 
 # ── persistent roots ────────────────────────────────────────────────────────
 # /data/dsh   every piece of GUI state (profiles, sessions, storages,
@@ -382,10 +394,12 @@ RUN set -eux; \
     node "${found}" --version
 
 # ── verify the global install actually carries the plugin tree ──────────────
-# The web profile resolves its plugins from THIS tree: dsh projects the
-# installation into $DSH_HOME/profiles/node_modules as symlinks, and the profile
-# itself declares no dependencies, so a package missing here cannot be recovered
-# from anywhere.
+# The web profile resolves its plugins from THIS tree. Since 0.2.1-rc.2 there is
+# no symlink projection into $DSH_HOME at all: `dsh-app-boot` computes a runtime
+# resolution over the installation at every start. The profile still declares no
+# dependencies (`dependencies: {}`), so a package that is missing here cannot be
+# recovered from anywhere — not from the profile, and not from the registry at
+# runtime, because this container has no npm egress by design.
 #
 # `@deepseek-ai/dsh-sandbox-local` is a regular dependency of
 # `@deepseek-ai/dsh-base`, and it imports
@@ -396,28 +410,34 @@ RUN set -eux; \
 # down, with the symptom pointing at the import site rather than the cause:
 #   plugin(s) failed to load: @deepseek-ai/dsh-sandbox-local; could not be resolved
 #
-# RESOLVED, and verified by a real build: with DSH_VERSION at the newest release
-# of its line and the four packages above pinned explicitly, the install is
-# consistent. npm then places the pinned four at the npm global ROOT and nests
-# the rest beside the CLI — two locations, both of which Node resolves (the
-# global root is itself an ancestor node_modules directory), which is why the
-# check below looks in both. The boot smoke test that follows is what actually
-# proves the profile projection resolves the sandbox plugins from wherever they
-# landed; that test is the reason this image is known to boot.
+# The list below is deliberately the set whose absence produces a confusing
+# failure rather than a clear one:
+#   dsh-base / dsh-web-app      the two bundles the web profile names
+#   *-sandbox / sandbox-policy  the Linux confinement rung (see the doctor)
+#   dsh-host-webserver          the row the bind overlay targets
+#   dsh-client-connection       the browser bundle patch-client-settings edits
+#   dsh-web-frontend            the built SPA the GUI serves
+#   node-addon-system           the Landlock launcher module
+#
+# The check RESOLVES each package the way the runtime will, anchored at the CLI's
+# own package.json: that covers the nested tree AND the npm global root (the global
+# root is an ancestor node_modules directory), and it does not guess at a layout.
+# An earlier version tested two hardcoded directories, which reports a false
+# "missing" as soon as npm hoists differently. The boot smoke test after this is
+# what actually proves the composed profile loads; this step makes a failure name
+# the package instead of the import site.
 RUN set -eux; \
     DSH_PKG_DIR="$(dirname "$(dirname "$(cat /tmp/dsh-npm-bin.path)")")"; \
     TREE="${DSH_PKG_DIR}/node_modules/@deepseek-ai"; \
     GLOBAL="$(npm root -g)/@deepseek-ai"; \
-    resolve_pkg() { \
-      if [ -d "${TREE}/$1" ]; then printf '%s' "${TREE}/$1"; \
-      elif [ -d "${GLOBAL}/$1" ]; then printf '%s' "${GLOBAL}/$1"; \
-      fi; \
+    pkg_version() { \
+      node -e 'const { createRequire } = require("node:module"); const { dirname, join } = require("node:path"); const { readFileSync } = require("node:fs"); const req = createRequire(process.argv[1] + "/package.json"); let dir; try { dir = dirname(req.resolve("@deepseek-ai/" + process.argv[2] + "/package.json")); } catch { process.exit(1); } try { process.stdout.write(JSON.parse(readFileSync(join(dir, "package.json"), "utf8")).version); } catch { process.stdout.write("?"); }' "${DSH_PKG_DIR}" "$1" 2>/dev/null || true; \
     }; \
     echo "--- npm $(npm --version) from $(command -v npm), npm root -g: $(npm root -g) ---"; \
     echo "--- plugin packages: $(ls "$TREE" 2>/dev/null | wc -l) beside the CLI, $(ls "$GLOBAL" 2>/dev/null | wc -l) at the global root ---"; \
     missing=""; \
-    for p in dsh-base dsh-web-app dsh-sandbox-local dsh-bash-sandbox dsh-fs-sandbox node-addon-system; do \
-      if [ -z "$(resolve_pkg "$p")" ]; then missing="${missing} ${p}"; fi; \
+    for p in dsh-base dsh-web-app dsh-sandbox-local dsh-bash-sandbox dsh-fs-sandbox dsh-host-webserver dsh-client-connection dsh-web-frontend node-addon-system; do \
+      if [ -z "$(pkg_version "$p")" ]; then missing="${missing} ${p}"; fi; \
     done; \
     if [ -n "${missing}" ]; then \
       echo "ERROR: the global install is missing:${missing}"; \
@@ -427,54 +447,71 @@ RUN set -eux; \
     fi; \
     mismatched=""; \
     echo "--- resolved versions (every one must equal DSH_VERSION=${DSH_VERSION}) ---"; \
-    for p in dsh-base dsh-web-app dsh-sandbox-local dsh-bash-sandbox dsh-fs-sandbox dsh-pwsh-sandbox dsh-sandbox-policy; do \
-      d="$(resolve_pkg "$p")"; \
-      v="missing"; \
-      if [ -n "$d" ]; then v="$(node -p "require('${d}/package.json').version" 2>/dev/null || echo '?')"; fi; \
+    for p in dsh-base dsh-web-app dsh-sandbox-local dsh-bash-sandbox dsh-fs-sandbox dsh-pwsh-sandbox dsh-sandbox-policy dsh-host-webserver dsh-client-connection; do \
+      v="$(pkg_version "$p")"; \
+      if [ -z "${v}" ]; then v="missing"; fi; \
       echo "  ${p} ${v}"; \
       if [ "${v}" != "${DSH_VERSION}" ]; then mismatched="${mismatched} ${p}@${v}"; fi; \
     done; \
     if [ -n "${mismatched}" ]; then \
       echo "ERROR: these packages are not at DSH_VERSION=${DSH_VERSION}:${mismatched}"; \
-      echo 'Prerelease ranges resolve to the NEWEST prerelease, so the CLI and its'; \
-      echo 'bundles can disagree with each other. DSH_VERSION must be the newest'; \
-      echo 'release of its line, and everything that pattern needs is pinned above.'; \
+      echo 'Every @deepseek-ai/dsh-* dependency in 0.2.1-rc.2 is an EXACT version, so a'; \
+      echo 'mismatch here means the install was mixed (a second copy from the global'; \
+      echo 'root, a stale node_modules layer, or a different DSH_VERSION in .env).'; \
+      echo 'Rebuild without the npm cache: docker compose build --no-cache dsh'; \
       exit 1; \
     fi; \
     echo 'every package the web profile needs is installed, all at one version'
 
-# ── deployment patch: settings UI on a remote origin ────────────────────────
-# dsh decides where the settings document lives in the BROWSER:
+# ── deployment patch: settings UI document actions on a remote origin ───────
+# The client connection defines, in the BROWSER:
 #
-#     const persistence = ctx.remote.$host.isLoopback ? "host" : "memory";
+#     isLoopback: transport?.ownsHost === true || pageLocation === void 0
+#              || isLoopbackHostname(pageLocation.hostname),
 #
-# `$host.isLoopback` is true only for an Electron shell, a document with no
-# location, or a loopback hostname — so on a domain-served deployment the Models
-# page reads a session-local document and reports "settings are available in this
-# browser". The script rewrites that one definition (a second, independent gate
-# in dsh-client-ui-settings-general reads the same flag), anchoring on the whole
-# expression rather than a line number and validating that the result parses.
+# and `dsh-client-ui-settings-general` gates a controller on it:
 #
-# The patched file IS what the browser runs: dsh-client-modules serves each
-# plugin's lib/client.js from disk as plugins/<id>/client.js, so no monorepo
-# build, no fork and no per-release rebase are needed.
+#     ctx.remote.$host.isLoopback ? new SettingsDocumentStore(...) : void 0
+#
+# On a domain-served deployment none of the three conditions is true, so the
+# General page loses its settings-document actions. The script rewrites that one
+# definition, anchoring on the whole expression rather than a line number and
+# validating that the result parses.
+#
+# What changed in 0.2.1-rc.2, and why this note exists:
+#   * the browser bundle MOVED from lib/client.js to lib/client.browser.js and is
+#     published through exports["./client"]; the script now reads that field, so
+#     it follows the package instead of a filename;
+#   * the Models page no longer uses this flag — it reads and writes the host
+#     document through `remote.settings`, which works on any origin the trust
+#     fence admits. The patch is kept for the General page's document actions.
+#
+# The patched file IS what the browser runs: dsh-client-modules resolves each
+# plugin's client bundle from disk and serves it under /plugins/<id>/, so no
+# monorepo build, no fork and no per-release rebase are needed.
 #
 # It is applied HERE, as root, and nowhere else can work. The file it rewrites
 # belongs to the npm global installation:
 #
-#   /usr/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-connection/lib/client.js
+#   /usr/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-connection/lib/client.browser.js
 #
 # That tree is root-owned while the container runs as the unprivileged DSH_UID, so
 # a runtime attempt can only ever end in
 #
 #   cannot stage a file in .../dsh-client-connection/lib (EACCES)
 #
-# and the profile's node_modules is a SYMLINK FARM pointing back into that same
-# tree, so there is no writable copy to patch instead. Patching the installation
-# copy IS patching what the browser loads, because dsh-client-modules serves the
-# file it resolves. entrypoint.sh re-runs this script with --check on every start
-# and only warns, which covers a plugin package reinstalled by `dsh plugin`.
-RUN node /usr/local/bin/dsh-patch-client-settings.mjs
+# and — unlike ≤0.2.0 — there is not even a symlinked copy in the profile, because
+# 0.2.1 no longer projects the installation there. Patching the installation copy
+# IS patching what the browser loads, because dsh-client-modules serves the file
+# it resolves. entrypoint.sh re-runs this script with --check on every start and
+# only warns, which covers a plugin package reinstalled by `dsh plugin`.
+#
+# The `--check` after the apply is a build gate: without it, a release that renames
+# the expression again would ship an image whose log line admits the patch never
+# landed. With it, the build fails and names the new file to grep.
+RUN node /usr/local/bin/dsh-patch-client-settings.mjs \
+ && node /usr/local/bin/dsh-patch-client-settings.mjs --check --quiet \
+ && echo 'settings-UI patch applied to the installation copy'
 
 # ── bundled plugins ─────────────────────────────────────────────────────────
 # Everything under plugins/ ships into the image at /opt/dsh-plugins and is
@@ -482,9 +519,11 @@ RUN node /usr/local/bin/dsh-patch-client-settings.mjs
 # has composed it. entrypoint.sh does two things per plugin:
 #
 #   1. links the package into $DSH_HOME/profiles/node_modules, so the plugin rows
-#      in the composed tree can resolve it. This survives dsh's own link
-#      projection: removeLinkProjections only unlinks symlinks whose target sits
-#      inside <profile>/.dsh-module-fallback, and "every other symlink stays";
+#      in the composed tree can resolve it. Since 0.2.1-rc.2 those symlinks are
+#      exactly what `dsh-app-boot` calls a "linked root": it registers every
+#      symlink pointing outside the profiles tree by package name, and nothing
+#      unlinks them during boot (removeLinkProjections only removes the ≤0.2.0
+#      `.dsh-module-fallback` farm);
 #   2. appends the bundle's own patch layer to $DSH_HOME/cordis.patch.yml, the
 #      home-level patch applied over every profile's layer, which is also why the
 #      first start already has the plugin. It is seeded ONCE, so the options you
@@ -492,8 +531,10 @@ RUN node /usr/local/bin/dsh-patch-client-settings.mjs
 #
 # A plugin directory must be a dsh bundle: a package.json with a name that
 # resolves, an entry point that exists, and — when it declares
-# `dsh.bundle.patch` — that patch file. The checks below fail the build rather
-# than shipping an image whose GUI silently loses its plugins.
+# `dsh.bundle.patch` — the patch file(s) it names. `patch` is one path OR an
+# ordered list (dsh-web-app itself uses a list in 0.2.1-rc.2), so both shapes are
+# validated here and both are seeded by entrypoint.sh, in order. The checks below
+# fail the build rather than shipping an image whose GUI silently loses plugins.
 COPY plugins/ /opt/dsh-plugins/
 RUN set -eux; \
     chmod -R a+rX /opt/dsh-plugins; \
@@ -506,9 +547,11 @@ RUN set -eux; \
       if [ -z "$name" ]; then echo "ERROR: ${manifest} declares no name"; exit 1; fi; \
       entry="$(node -p "const p = require('${manifest}'); const e = p.exports ?? p.main ?? ''; typeof e === 'string' ? e : (e['.'] ?? '')")"; \
       if [ -z "$entry" ] || [ ! -e "${dir}${entry}" ]; then echo "ERROR: ${name}: entry point ${entry:-<none>} does not exist"; exit 1; fi; \
-      patch="$(node -p "require('${manifest}').dsh?.bundle?.patch ?? ''")"; \
-      if [ -n "$patch" ] && [ ! -f "${dir}${patch}" ]; then echo "ERROR: ${name}: dsh.bundle.patch ${patch} does not exist"; exit 1; fi; \
-      echo "bundled plugin: ${name}  entry: ${entry}  patch: ${patch:-none}"; \
+      patches="$(node -p "const p = require('${manifest}').dsh?.bundle?.patch; Array.isArray(p) ? p.join(' ') : (p ?? '')")"; \
+      for one in $patches; do \
+        if [ ! -f "${dir}${one}" ]; then echo "ERROR: ${name}: dsh.bundle.patch ${one} does not exist"; exit 1; fi; \
+      done; \
+      echo "bundled plugin: ${name}  entry: ${entry}  patch: ${patches:-none}"; \
       count=$((count + 1)); \
     done; \
     echo "bundled plugins: ${count} — add a directory under plugins/ to grow the set"
@@ -541,24 +584,26 @@ RUN set -eux; \
 #     Already up to date
 #     Done in 919ms using pnpm v12.11.2
 # The profile's package.json declares NO dependencies (`dependencies: {}`). Its
-# plugin set is named by `dsh.profile.bundles` and materialised AT BOOT as a
-# projection of the installation's own packages — dsh-app-boot describes it as
-# wiring "the installation and selected bundles to Node's ESM and CommonJS
-# resolvers", and it only installs what "the installation does not supply".
+# plugin set is named by `dsh.profile.bundles` (web = dsh-base + dsh-web-app) and
+# resolved AT BOOT from the installation — dsh-app-boot describes it as wiring
+# "the installation and selected bundles to Node's ESM and CommonJS resolvers",
+# and it only installs what "the installation does not supply".
 #
 # Two consequences:
 #   * nothing needs the npm registry at runtime, so there is nothing to bake;
-#   * a STALE projection is fatal. A profiles/node_modules carried over from an
-#     older home (a volume migrated with `cp -a` keeps the old owner) shadows the
-#     installation, and because the profile declares no dependencies NOTHING ever
-#     rebuilds it — so plugin resolution fails with "plugin(s) failed to load:
-#     … could not be resolved" on every restart, and a chown does not help.
-#     entrypoint.sh recognises that shape and says how to clear it.
+#   * the profile directory must NOT be treated as a package farm. 0.2.1-rc.2
+#     removed the symlink projection that ≤0.2.0 wrote into
+#     $DSH_HOME/profiles/node_modules, so in 0.2.1 that directory holds only the
+#     bundles this entrypoint links. A leftover projection from an older home is
+#     inert (it points at the same absolute installation paths) but is dead
+#     weight, and it is exactly what used to shadow the installation and fail
+#     plugin loading after an upgrade. entrypoint.sh recognises that shape and
+#     prints how to clear it.
 
 # ── deployment patch ────────────────────────────────────────────────────────
-# Applied by entrypoint.sh at start, NOT here: the profile — and therefore the
-# client bundle this rewrites — only exists once dsh has projected it into
-# $DSH_HOME at boot. See the note above.
+# Applied above, at build time, against the npm installation. There is no longer
+# a profile copy to patch at boot: 0.2.1 does not project the installation into
+# $DSH_HOME. entrypoint.sh only re-verifies it with --check.
 
 # ── boot smoke test ─────────────────────────────────────────────────────────
 # Prove the image can boot a profile AT ALL, from an EMPTY home, which is exactly
@@ -570,21 +615,28 @@ RUN set -eux; \
 # `timeout` exiting 124 means the server was still up when the clock ran out:
 # that is the success signal. Any other exit code means it crashed on the way up,
 # and its first log lines are printed to say why.
+#
+# The resolution probe is anchored at the INSTALLATION, not at the profile: since
+# 0.2.1-rc.2 the profile has no node_modules projection, so the ≤0.2.0 version of
+# this step (resolve from /profiles/web) would print failures while the server was
+# perfectly healthy. This probes the place the runtime resolution actually points
+# at.
 RUN set -eux; \
     DSH_NPM_BIN="$(cat /tmp/dsh-npm-bin.path)"; \
+    DSH_PKG_DIR="$(dirname "$(dirname "${DSH_NPM_BIN}")")"; \
     mkdir -p /tmp/dsh-boot-check; \
     status=0; \
-    timeout 60 env DSH_HOME=/tmp/dsh-boot-check DSH_TRUSTED_HOSTS=localhost \
+    timeout 60 env DSH_HOME=/tmp/dsh-boot-check \
       node "${DSH_NPM_BIN}" web --no-open > /tmp/dsh-boot.log 2>&1 || status=$?; \
     sed -n '1,40p' /tmp/dsh-boot.log; \
-    echo "--- the profile projected $(ls /tmp/dsh-boot-check/profiles/node_modules/@deepseek-ai 2>/dev/null | wc -l) packages ---"; \
-    ls /tmp/dsh-boot-check/profiles/node_modules/@deepseek-ai 2>/dev/null | grep -iE 'sandbox|addon' || echo '(no sandbox/addon packages projected)'; \
-    echo '--- can Node resolve these from the profile directory? ---'; \
-    mkdir -p /tmp/dsh-boot-check/profiles/web; \
-    for m in @deepseek-ai/dsh-base @deepseek-ai/dsh-sandbox-local @deepseek-ai/node-addon-system/landlock-run; do \
+    echo "--- profile node_modules entries: $(ls /tmp/dsh-boot-check/profiles/node_modules 2>/dev/null | wc -l) (0 is expected: 0.2.1+ projects nothing) ---"; \
+    echo '--- can Node resolve these from the installation? ---'; \
+    for m in @deepseek-ai/dsh-base @deepseek-ai/dsh-sandbox-local @deepseek-ai/node-addon-system/landlock-run @deepseek-ai/dsh-client-connection/client; do \
       printf 'resolve %s -> ' "$m"; \
-      (cd /tmp/dsh-boot-check/profiles/web && node -p "require.resolve('$m')" 2>&1 | head -n 1) || true; \
+      (cd "${DSH_PKG_DIR}" && node -p "require.resolve('$m')" 2>&1 | head -n 1) || true; \
     done; \
+    echo '--- did the composed profile name the two web bundles? ---'; \
+    node -p "require('/tmp/dsh-boot-check/profiles/web/package.json').dsh.profile.bundles.join(' ')" || exit 1; \
     if grep -q 'plugin tree failed to load' /tmp/dsh-boot.log; then \
       echo 'the plugin tree does not load: this image cannot boot a profile'; \
       exit 1; \
@@ -594,7 +646,6 @@ RUN set -eux; \
       exit 1; \
     fi; \
     echo 'the GUI booted from an empty home and stayed up for 60s'; \
-    echo "projected profile packages: $(ls /tmp/dsh-boot-check/profiles/node_modules/@deepseek-ai | wc -l)"; \
     rm -rf /tmp/dsh-boot-check /tmp/dsh-boot.log
 
 # ── unprivileged identity ───────────────────────────────────────────────────

@@ -12,14 +12,14 @@ x-dsh-image: &dsh-image
   build:
     context: .
     args:
-      DSH_VERSION: ${DSH_VERSION:-0.1.5-rc.3}
+      DSH_VERSION: ${DSH_VERSION:-0.2.1-rc.2}
       DSH_UID: ${DSH_UID:-1000}
       DSH_GID: ${DSH_GID:-1000}
       # Optional image layers. Both default to 1 (installed); set them to 0 in
       # .env to build a leaner image. See README 「镜像里预装了什么」 for the cost.
       INSTALL_OFFICE: ${INSTALL_OFFICE:-1}
       INSTALL_PYTHON_DOCS: ${INSTALL_PYTHON_DOCS:-1}
-  image: dsh:${DSH_VERSION:-0.1.5-rc.3}
+  image: dsh:${DSH_VERSION:-0.2.1-rc.2}
 
 services:
   dsh:
