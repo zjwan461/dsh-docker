@@ -19,10 +19,14 @@ x-dsh-image: &dsh-image
       DSH_VERSION: ${DSH_VERSION:-0.2.1-rc.2}
       DSH_UID: ${DSH_UID:-1000}
       DSH_GID: ${DSH_GID:-1000}
-      # Optional image layers. Both default to 1 (installed); set them to 0 in
-      # .env to build a leaner image. See README 「镜像里预装了什么」 for the cost.
+      # Optional image layers. All three default to 1 (installed); set them to 0
+      # in .env to build a leaner image. See README 「镜像里预装了什么」 for the
+      # cost. INSTALL_CHROME=1 is the headless browser (google-chrome-stable);
+      # the call site must still pass --no-sandbox and --disable-dev-shm-usage,
+      # see the Dockerfile.
       INSTALL_OFFICE: ${INSTALL_OFFICE:-1}
       INSTALL_PYTHON_DOCS: ${INSTALL_PYTHON_DOCS:-1}
+      INSTALL_CHROME: ${INSTALL_CHROME:-1}
   image: dsh:${DSH_VERSION:-0.2.1-rc.2}
 
 services:

@@ -95,10 +95,19 @@ Caddy 已经同时承担了**域名虚拟主机、TLS 终结、反向代理**三
 |---|---|---|
 | `INSTALL_OFFICE=1` | `libreoffice-core/writer/calc/impress` + `pandoc` | **约 500MB 以上** |
 | `INSTALL_PYTHON_DOCS=1` | 文档生成 `python-pptx` `python-docx` `openpyxl` `Pillow`；数值栈 `numpy` `pandas` `scipy` `matplotlib`；抓取/解析 `requests` `beautifulsoup4` `lxml` `PyYAML` | 约 200–250MB |
+| `INSTALL_CHROME=1` | `google-chrome-stable` 无头 Chrome + 它自己的运行库（nss / gtk3 / cups / alsa / X 库） | 约 500MB |
 
 `INSTALL_PYTHON_DOCS` 这个名字比内容窄了：这一层早已不只是文档库（当时只有后面 4 个）。参数名保留是为了不和已有的 `.env` / `compose.yaml` 冲突，读作"Python 库"即可。`matplotlib` 走 Agg 后端（`MPLBACKEND=Agg`），画图直接出文件；中文标签靠上一层已装的 `fonts-noto-cjk`，用前选一下字体：`rcParams['font.sans-serif'] = ['Noto Sans CJK SC']`。
 
 没装的是 `scikit-learn`（在 numpy/scipy 之上再加 150MB 左右，技能里没有要训练的模型）和 `markitdown`（会拖进 magika + onnxruntime 做文件类型识别，为了一个 LibreOffice/pandoc 已经覆盖的转换器再翻一倍体积）——真需要时都是一行。
+
+`INSTALL_CHROME` 装的是 Google 官方 stable 版的无头 Chrome，落在 `/usr/bin/google-chrome`，**不是** Debian 的 `chromium`：它是 puppeteer/playwright 说 `channel: 'chrome'` 时指的那个构建，`--headless=new` / `--print-to-pdf` / `--screenshot` 都在，版本也不会滞后。浏览器**不由工具自己下载**（那会落到 `~/.cache/puppeteer` 或 `~/.cache/ms-playwright`，首次使用要出网），系统装一次、所有工具和所有 workspace 共用：
+
+```bash
+google-chrome --headless=new --no-sandbox --print-to-pdf=/tmp/x.pdf page.html
+```
+
+**调用方必须自己带两个参数**：`--no-sandbox`（容器里既没有 setuid helper 也没有非特权 user namespace；注意这**不是** dsh 的沙箱——Landlock 约束的是 agent 的 shell，Chrome 是它启动的子进程，仍在约束之内）和 `--disable-dev-shm-usage`（Docker 的 `/dev/shm` 只有 64MB，大页面会崩）。没装 `chromedriver`：puppeteer/playwright 直接说 CDP，Selenium 要的话自己加一行。
 
 设成 `0` 可以瘦身，但**必须重新构建**（`docker compose build && docker compose up -d`）。
 
@@ -495,7 +504,7 @@ docker compose logs caddy | grep -i -E 'certificate|obtain|error'
 | 3 | 在模型页改一项并保存，宿主上 `git diff data/dsh/settings.yaml` | 看到 UI 的写入落到宿主文件 | `data/dsh` 不是目录挂载，或属主与 `DSH_UID` 不一致（见排障表） |
 | 4 | 让 agent 执行 `touch /etc/probe` | `[sandbox: file access denied under workspace-write mode]` | 出现 `SANDBOX_UNAVAILABLE` ⇒ 该内核没有 Landlock（启动日志里有 doctor 结论） |
 | 5 | `docker compose logs dsh \| grep 'landlock launcher'` | `full (/usr/.../landlock-run)` | `partial` = 内核 Landlock ABI 偏旧（文件效果仍受限，fail-closed）；`cannot locate` = `DSH_GLOBAL_ROOT` 指错目录 |
-| 6 | `docker compose exec dsh soffice --headless --version`；同理试 `ffmpeg -version`、`pdftotext -v`、`python3 -c "import pptx, pandas, numpy, matplotlib"`、`fc-list \| grep -ci CJK` | 各自输出版本；CJK 字体数为正 | 检查 `.env` 的 `INSTALL_OFFICE` / `INSTALL_PYTHON_DOCS` 是否为 1，然后重建镜像 |
+| 6 | `docker compose exec dsh soffice --headless --version`；同理试 `ffmpeg -version`、`pdftotext -v`、`python3 -c "import pptx, pandas, numpy, matplotlib"`、`google-chrome --version`、`fc-list \| grep -ci CJK` | 各自输出版本；CJK 字体数为正 | 检查 `.env` 的 `INSTALL_OFFICE` / `INSTALL_PYTHON_DOCS` / `INSTALL_CHROME` 是否为 1，然后重建镜像 |
 | 7 | `docker compose logs dsh \| grep 'built-in skills'` | `none in /opt/dsh-skills (mechanism ready; …)`；放了技能后变成计数 | 打出「机制就绪」即算通过：本镜像不带技能 |
 | 8 | 同时开 443 与明文端口时：`curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:<宿主端口>/` | `401` | `403` = `DSH_HTTP_ALLOWED_RANGES` 挡住了（**从服务器自己发起会被挡，属正常**，见下）；`000`/拒绝连接 = compose 里那行 `:80` 映射还没解开，或 caddy 没重建（明文站点本身现在**默认已定义**，见 Caddyfile 末尾） |
 | 9 | 明文用 `http://<authority>:<宿主端口>/`，HTTPS 用 `https://<authority>/` | 两条路各自可用 | `https://…:<明文端口>` **必然失败**：TLS 打到了明文监听上 |

@@ -182,6 +182,121 @@ RUN set -eux; \
       echo 'INSTALL_OFFICE=0: LibreOffice and pandoc are NOT in this image'; \
     fi
 
+# ── headless Chrome (the browser the agent drives, switchable) ──────────────
+# Build with --build-arg INSTALL_CHROME=0 (or INSTALL_CHROME=0 in .env) to leave
+# roughly half a gigabyte out of the image.
+#
+# A browser is the one routine agent job that curl cannot fake: "open this page
+# and click through it", "screenshot the deck I just built", "render this HTML to
+# PDF". There is no display here and there never will be, so what is needed is
+# exactly the headless half of a browser — and that is all that gets installed.
+#
+# google-chrome-stable rather than Debian's `chromium`:
+#   * the official deb is the build puppeteer/playwright mean by
+#     `channel: 'chrome'`; bookworm's chromium is a security-team rebuild, its
+#     version lags, and it is not the binary the ecosystem tests against;
+#   * --headless=new, --dump-dom, --print-to-pdf and --screenshot are all there,
+#     which is what makes "render this to PDF" reproducible.
+# It unpacks to /opt/google/chrome with /usr/bin/google-chrome as the entry
+# point — hand that path to whichever tool the agent reaches for:
+#   puppeteer.launch({ executablePath: '/usr/bin/google-chrome',
+#                      args: ['--no-sandbox', '--disable-dev-shm-usage'] })
+#   chromium.launch({ channel: 'chrome', args: [...] })          # playwright
+#   google-chrome --headless=new --no-sandbox --print-to-pdf=x.pdf page.html
+#
+# NOT the puppeteer/playwright browser download: those cache under
+# ~/.cache/puppeteer or ~/.cache/ms-playwright — once per $HOME, once per
+# node_modules tree — and fetch themselves from a CDN at first use. In a
+# container that turns a working browser into a run-time egress dependency, and
+# into a confusing failure when there is none. One system install serves every
+# tool and every workspace with no network at all.
+#
+# Deliberately absent: chromedriver. Puppeteer and Playwright speak CDP directly,
+# so a driver binary would be dead weight; a Selenium user adds one line.
+#
+# TWO FLAGS THE CALLER MUST PASS. They are documented here instead of baked into
+# a wrapper because Chrome takes its command line from whoever launches it:
+#   --no-sandbox  Chrome's own sandbox needs either a setuid helper or
+#                 unprivileged user namespaces, and this container has neither.
+#                 This is NOT dsh's sandbox: dsh confines the agent's shell with
+#                 Landlock and Chrome runs INSIDE that confinement as a child of
+#                 it, so a page still cannot reach what the agent itself cannot.
+#                 The alternative (--cap-add=SYS_ADMIN plus a custom seccomp
+#                 profile) hands the container far more than it takes away.
+#   --disable-dev-shm-usage  /dev/shm is 64 MB in Docker; Chrome crashes on
+#                 large pages without it and spills to /tmp instead.
+# If $HOME is not writable by the runtime uid, also pass a --user-data-dir.
+#
+# The library list is the deb's own Depends, spelled out: on a slim base none of
+# nss, gtk3, cups, alsa or the X libraries exist, and if an upstream release adds
+# a dependency the build then fails HERE instead of producing an image whose
+# browser dies on launch. --no-install-recommends still keeps the desktop-only
+# extras out, and fonts-noto-cjk from the layer above is what makes a Chinese
+# page render as text rather than tofu.
+#
+# The deb's postinst also installs an apt source and a daily cron job for its own
+# updater. Both are removed: this image tracks a Chrome version by rebuilding, and
+# a source pointing at dl.google.com would make every later `apt-get update` in
+# the container depend on egress.
+ARG INSTALL_CHROME=1
+RUN set -eux; \
+    if [ "${INSTALL_CHROME}" = "1" ]; then \
+      apt-get update; \
+      apt-get install -y --no-install-recommends \
+        ca-certificates \
+        fonts-liberation \
+        libasound2 \
+        libatk-bridge2.0-0 \
+        libatk1.0-0 \
+        libatspi2.0-0 \
+        libcairo2 \
+        libcups2 \
+        libcurl4 \
+        libdbus-1-3 \
+        libdrm2 \
+        libgbm1 \
+        libglib2.0-0 \
+        libgtk-3-0 \
+        libnspr4 \
+        libnss3 \
+        libpango-1.0-0 \
+        libu2f-udev \
+        libvulkan1 \
+        libx11-6 \
+        libxcb1 \
+        libxcomposite1 \
+        libxdamage1 \
+        libxext6 \
+        libxfixes3 \
+        libxkbcommon0 \
+        libxrandr2 \
+        wget \
+        xdg-utils; \
+      curl -fsSL -o /tmp/google-chrome.deb \
+        https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb; \
+      apt-get install -y --no-install-recommends /tmp/google-chrome.deb; \
+      rm -f /tmp/google-chrome.deb \
+            /etc/apt/sources.list.d/google-chrome.list \
+            /etc/cron.daily/google-chrome; \
+      rm -rf /var/lib/apt/lists/*; \
+      google-chrome --version; \
+      chrome_status=0; \
+      google-chrome --headless=new --no-sandbox --disable-gpu \
+          --disable-dev-shm-usage --user-data-dir=/tmp/chrome-smoke \
+          --dump-dom 'data:text/html,chrome-headless-ok' \
+          > /tmp/chrome-smoke.dom 2> /tmp/chrome-smoke.err || chrome_status=$?; \
+      if [ "${chrome_status}" != "0" ] \
+         || ! grep -q 'chrome-headless-ok' /tmp/chrome-smoke.dom; then \
+        sed -n '1,30p' /tmp/chrome-smoke.err; \
+        echo "headless Chrome exited ${chrome_status} without rendering a DOM"; \
+        exit 1; \
+      fi; \
+      rm -rf /tmp/chrome-smoke /tmp/chrome-smoke.dom /tmp/chrome-smoke.err; \
+      echo 'headless Chrome launched and rendered a DOM'; \
+    else \
+      echo 'INSTALL_CHROME=0: no browser is in this image'; \
+    fi
+
 # ── python libraries: document generation + the everyday numeric stack ──────
 # The python interpreter arrives with the base image; everything here is what
 # turns it from "present" into a capability the agent reaches for. One single
