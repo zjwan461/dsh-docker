@@ -23,7 +23,7 @@ Caddy 已经同时承担了**域名虚拟主机、TLS 终结、反向代理**三
 
 ## 为什么是这样设计的（都是对着 `@deepseek-ai/dsh` 的 0.2.1-rc.2 源码核过的；0.1.5-rc.x / 0.2.0-rc.x 的结论仍然有效）
 
-> 版本基线：本仓库已适配 **0.2.1-rc.2**（原为 0.2.0-rc.2）。0.2.1 改了六处**会直接影响本部署**的东西——profile 不再向 `$DSH_HOME` 投影安装树、设置页改为走 `remote.settings`、客户端 bundle 从 `lib/client.js` 拆成 `lib/client.browser.js`、`webserver` 行的 config 多了 `tls`、**该行不再接受 `0.0.0.0`**、**`.credentials.yaml` 必须 owner-only**——外加「依赖全部精确锁版」这一项顺带简化。逐条差异与升级动作见「[升级到 0.2.1-rc.2](#升级到-021-rc2)」。
+> 版本基线：本仓库已适配 **0.2.1-rc.2**，当前固定的发布号是 **0.2.1-rc.5**（见 `.env.example`；同一 0.2.1 线，适配结论通用）。0.2.1 改了六处**会直接影响本部署**的东西——profile 不再向 `$DSH_HOME` 投影安装树、设置页改为走 `remote.settings`、客户端 bundle 从 `lib/client.js` 拆成 `lib/client.browser.js`、`webserver` 行的 config 多了 `tls`、**该行不再接受 `0.0.0.0`**、**`.credentials.yaml` 必须 owner-only**——外加「依赖全部精确锁版」这一项顺带简化。逐条差异与升级动作见「[升级到 0.2.1-rc.2](#升级到-021-rc2)」。
 
 | 事实 | 由此产生的设计 |
 |---|---|
@@ -56,6 +56,7 @@ Caddy 已经同时承担了**域名虚拟主机、TLS 终结、反向代理**三
 | `patch-client-settings.mjs` | 给浏览器 bundle 打补丁，让域名访问时 General 设置页仍能操作宿主设置文档（见「设置页为什么现在能用」）。**构建期以 root 应用、随后 `--check` 复核**——它改的文件在 root 所有的 npm 全局安装树里，0.2.1 起 profile 里连符号链接副本都没有了，运行时 uid 无论怎么写都只能 EACCES。entrypoint 每次启动再 `--check` 一次 |
 | `workspaces/` | 工作区 bind mount 源目录 |
 | `skills/` | 内置（bundled）技能目录；构建时 COPY 到镜像 `/opt/dsh-skills`。**目前故意为空**，机制已就绪 |
+| `.github/workflows/build-image.yml` | GitHub Actions：lint + 构建镜像并推 GHCR（版本取自 `.env.example`，PR 只构建不推送）。见「用 GitHub Actions 构建镜像」 |
 | `LICENSE` | Apache License 2.0 全文（与官方文本逐字节一致） |
 
 ## 镜像里预装了什么
@@ -653,6 +654,47 @@ docker compose exec dsh dsh plugin --profile web remove <package>
 # 插件集合变更需要重启 profile： docker compose restart dsh
 
 ```
+
+## 用 GitHub Actions 构建镜像（可选）
+
+`.github/workflows/build-image.yml` 在 GitHub 上构建镜像并推到 GHCR。本机没有 Docker、或者想每次改完代码就有一份现成镜像时用它。
+
+**触发方式**
+
+| 事件 | 行为 |
+|---|---|
+| push 到 `main`（且改到 Dockerfile / entrypoint / plugins / skills / compose 等构建输入） | 构建 + 推送 `:<DSH_VERSION>`、`:latest`、`:sha-xxxxxxx` |
+| 打 `v*` tag | 构建 + 推送 `:<DSH_VERSION>`、tag 名、`:sha-…` |
+| Pull Request | **只构建，不推送**（不登录 registry），并把镜像 load 进 runner 做一次版本自检 |
+| Actions → Run workflow | 手动：可覆盖 dsh 版本、选 `full`/`slim` 层、选是否构建 arm64、选是否推送 |
+
+**版本来源**：`.env.example` 的 `DSH_VERSION`（当前 `0.2.1-rc.5`）。手动触发时可以填别的值；workflow 不自己发明版本，所以仓库里那一个数字仍然是唯一事实来源。`Dockerfile` / `compose.yaml` 的默认值与之保持一致。
+
+**产物**：`ghcr.io/zjwan461/dsh-docker:<DSH_VERSION>`。查看 `Run workflow` 的 job summary 会列出本次所有 tag 与各层开关。
+
+**不需要配置任何 secret**：推送用 `GITHUB_TOKEN`（`permissions: packages: write` 已在 workflow 里声明）。仓库的 Settings → Actions → General 保持默认的 *Read and write permissions* 即可；若被改成只读，workflow 会在登录那一步失败，把该 job 的 `permissions` 提权或调整仓库设置即可。
+
+> ⚠️ **GHCR 的包默认是私有的**，即使仓库是公开的。要在别的机器上免登录 `docker pull`：仓库页 → **Packages** → 选中该镜像 → *Package settings* → **Change visibility → Public**。保持私有的话，拉取前先 `echo $GITHUB_TOKEN | docker login ghcr.io -u <你的用户名> --password-stdin`（token 需要 `read:packages`）。
+
+**用 CI 产出的镜像替换本地构建**（不改 compose.yaml 的最省事做法）：
+
+```bash
+docker pull ghcr.io/zjwan461/dsh-docker:0.2.1-rc.5
+docker tag  ghcr.io/zjwan461/dsh-docker:0.2.1-rc.5 dsh:0.2.1-rc.5   # 对上 compose 里的 image: 名
+docker compose up -d --no-build
+```
+
+也可以把 compose 里的 `build:` 段整段删掉、把 `image:` 改成 `ghcr.io/zjwan461/dsh-docker:${DSH_VERSION:-0.2.1-rc.5}`，之后 `docker compose pull && docker compose up -d`。
+
+**几件值得知道的事**
+
+- **构建本身已经是冒烟测试**：Dockerfile 在构建期会跑 Node 版本下限、安装树完整性/版本断言、设置页补丁 `--check`、`--profile web --dump-config`，以及从空 home 起 `dsh web` 60 秒（`BOOT_SMOKE_SECONDS`，arm64 构建时自动放宽）。绿色的构建 = 这个镜像能启动。
+- 另有一个很快的 `lint` job（`bash -n`、`node --check`、插件 bundle 校验、`docker compose config -q`），PR 上跑，不用等 20 分钟镜像。
+- 缓存用 GitHub Actions cache（`type=gha,mode=max`），改一个 shell 脚本不会重装 npm/LibreOffice。
+- **arm64 需要手动勾选**：在 `platforms` 里选 `linux/amd64,linux/arm64`，但那是 QEMU 模拟，apt + npm + soffice 会慢很多（接近一小时）。workflow 会把构建期启动冒烟的预算从 60 秒放大到 240 秒（`BOOT_SMOKE_SECONDS` 构建参数），否则模拟下会被误判失败。除非真要在 ARM 机器上跑，否则保持 amd64。
+- `full` 层（Office + Chrome + Python）约多 1 GB；`slim` 会把三个 `INSTALL_*` 都设成 0，镜像小很多但 agent 不能转 Office 文档、跑无头浏览器或用 numpy/pandas。
+- 仓库同时镜像在 Gitee，但 GitHub Actions 只在 GitHub 上跑。
+- 构建输入之外的文件（`articles/`、`img/`、`.github/`）已加入 `.dockerignore`，不会上传进构建上下文。
 
 ## 配置项
 

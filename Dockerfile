@@ -32,12 +32,12 @@
 #     is loud, never silent.
 #
 # Build (context is the repository root):
-#   docker build -t dsh:0.2.1-rc.2 .
+#   docker build -t dsh:0.2.1-rc.5 .
 
 FROM python:3.11-slim-bookworm
 
 ARG NODE_MAJOR=22
-ARG DSH_VERSION=0.2.1-rc.2
+ARG DSH_VERSION=0.2.1-rc.5
 ARG DSH_UID=1000
 ARG DSH_GID=1000
 # Absolute path of the npm dsh CLI entry file. Deliberately NOT set here: the
@@ -731,6 +731,11 @@ RUN set -eux; \
 # that is the success signal. Any other exit code means it crashed on the way up,
 # and its first log lines are printed to say why.
 #
+# The budget is a build arg because the same Dockerfile is built for other
+# architectures in CI: under QEMU emulation Node needs noticeably longer to come
+# up, and a 60s budget would then fail a healthy image. Native builds keep 60s.
+ARG BOOT_SMOKE_SECONDS=60
+#
 # The resolution probe is anchored at the INSTALLATION, not at the profile: since
 # 0.2.1-rc.2 the profile has no node_modules projection, so the ≤0.2.0 version of
 # this step (resolve from /profiles/web) would print failures while the server was
@@ -741,7 +746,7 @@ RUN set -eux; \
     DSH_PKG_DIR="$(dirname "$(dirname "${DSH_NPM_BIN}")")"; \
     mkdir -p /tmp/dsh-boot-check; \
     status=0; \
-    timeout 60 env DSH_HOME=/tmp/dsh-boot-check \
+    timeout "${BOOT_SMOKE_SECONDS}" env DSH_HOME=/tmp/dsh-boot-check \
       node "${DSH_NPM_BIN}" web --no-open > /tmp/dsh-boot.log 2>&1 || status=$?; \
     sed -n '1,40p' /tmp/dsh-boot.log; \
     echo "--- profile node_modules entries: $(ls /tmp/dsh-boot-check/profiles/node_modules 2>/dev/null | wc -l) (0 is expected: 0.2.1+ projects nothing) ---"; \

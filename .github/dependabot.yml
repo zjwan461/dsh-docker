@@ -1,0 +1,15 @@
+# Keep the workflow's actions current. Pinned major tags are convenient but go
+# stale silently; Dependabot turns that into a reviewable PR.
+#
+# Only the github-actions ecosystem is watched on purpose: the image's own
+# dependency set is `@deepseek-ai/dsh`, which is pinned by DSH_VERSION in
+# .env.example and must not float.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: ci

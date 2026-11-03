@@ -17,3 +17,10 @@ verify.sh
 .gitignore
 .gitattributes
 *.log
+
+# Documentation and screenshots. Excluded so a CI build does not upload
+# megabytes of PNGs it will never COPY (the Dockerfile reads only entrypoint.sh,
+# doctor.mjs, patch-client-settings.mjs, plugins/ and skills/).
+articles
+img
+.github
