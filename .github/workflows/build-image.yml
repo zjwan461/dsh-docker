@@ -80,7 +80,7 @@ jobs:
     name: lint (shell + js + compose)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Shell syntax
         run: |
@@ -125,7 +125,7 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Free disk space
         # The full image (Office + Chrome + Python + the ~250-package npm tree)
