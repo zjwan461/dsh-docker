@@ -176,11 +176,17 @@ jobs:
           if [ "$push" = 'false' ] && [ "$platforms" = 'linux/amd64' ]; then load='true'; fi
 
           if [ "${DISPATCH_LAYERS:-full}" = 'slim' ]; then
-            office='0'; chrome='0'; python='0'
+            office='0'; chrome='0'; python='0'; cuda='0'
+            cuda_version='13.0'
           else
             office='${{ vars.INSTALL_OFFICE || '1' }}'
             chrome='${{ vars.INSTALL_CHROME || '1' }}'
             python='${{ vars.INSTALL_PYTHON_DOCS || '1' }}'
+            # CUDA stays off unless the repository sets INSTALL_CUDA=1 as an
+            # Actions variable: it is the one layer that is off by default, and a
+            # CI image with a compiler in it is not what most pulls want.
+            cuda='${{ vars.INSTALL_CUDA || '0' }}'
+            cuda_version='${{ vars.CUDA_VERSION || '13.0' }}'
           fi
 
           # The Dockerfile boots the GUI for this long to prove the image works.
@@ -199,6 +205,8 @@ jobs:
             echo "office=${office}"
             echo "chrome=${chrome}"
             echo "python=${python}"
+            echo "cuda=${cuda}"
+            echo "cuda_version=${cuda_version}"
             echo "smoke=${smoke}"
           } >> "$GITHUB_OUTPUT"
 
@@ -251,6 +259,8 @@ jobs:
             INSTALL_OFFICE=${{ steps.cfg.outputs.office }}
             INSTALL_CHROME=${{ steps.cfg.outputs.chrome }}
             INSTALL_PYTHON_DOCS=${{ steps.cfg.outputs.python }}
+            INSTALL_CUDA=${{ steps.cfg.outputs.cuda }}
+            CUDA_VERSION=${{ steps.cfg.outputs.cuda_version }}
             BOOT_SMOKE_SECONDS=${{ steps.cfg.outputs.smoke }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -286,7 +296,7 @@ jobs:
             echo "| image | \`${{ steps.cfg.outputs.image }}\` |"
             echo "| platforms | \`${{ steps.cfg.outputs.platforms }}\` |"
             echo "| pushed | \`${{ steps.cfg.outputs.push }}\` |"
-            echo "| layers | office=\`${{ steps.cfg.outputs.office }}\` chrome=\`${{ steps.cfg.outputs.chrome }}\` python=\`${{ steps.cfg.outputs.python }}\` |"
+            echo "| layers | office=\`${{ steps.cfg.outputs.office }}\` chrome=\`${{ steps.cfg.outputs.chrome }}\` python=\`${{ steps.cfg.outputs.python }}\` cuda=\`${{ steps.cfg.outputs.cuda }}\` (\`${{ steps.cfg.outputs.cuda_version }}\`) |"
             echo
             echo "Tags:"
             echo '```'

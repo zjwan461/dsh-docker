@@ -45,7 +45,7 @@ Caddy 已经同时承担了**域名虚拟主机、TLS 终结、反向代理**三
 
 | 文件 | 作用 |
 |---|---|
-| `Dockerfile` | `python:3.11-slim-bookworm`（glibc 基线；选它不是因为需要 Python，而是因为这是目标主机上已验证过、且能拿到预编译 glibc 原生依赖的配置）+ NodeSource Node 22 + 全局 `@deepseek-ai/dsh` + `pnpm` + 常用工具层（见「镜像里预装了什么」）；构建期用 `--dump-config` 自检整个 `web` profile |
+| `Dockerfile` | `python:3.11-slim-bookworm`（glibc 基线；选它不是因为需要 Python，而是因为这是目标主机上已验证过、且能拿到预编译 glibc 原生依赖的配置）+ NodeSource Node 22 + 全局 `@deepseek-ai/dsh` + `pnpm` + 常用工具层（见「镜像里预装了什么」）；构建期用 `--dump-config` 自检整个 `web` profile。可选的 `INSTALL_CUDA=1` 会再加 g++/cmake/ninja + CUDA 13 的 nvcc |
 | `entrypoint.sh` | 预检目录可写性 → 打印沙箱体检结论 → 生成 `--patch` 覆盖层并自检 → exec dsh |
 | `doctor.mjs` | 启动时探测并打印 Landlock runner 的实际可用性 |
 | `compose.yaml` | `dsh`（不发布端口）+ `caddy`（TLS 入口，唯一对外端口）；|
@@ -90,13 +90,14 @@ Caddy 已经同时承担了**域名虚拟主机、TLS 终结、反向代理**三
 | `libimage-exiftool-perl` | 读写 EXIF：给生成图打标、检查相机或模型写了什么 |
 | `fonts-dejavu-core` `fonts-noto-cjk` `fonts-noto-color-emoji` | **`fonts-noto-cjk` 是关键**：没有 CJK 字体，中文在 LibreOffice / pandoc / 预览渲染里全是**豆腐块** |
 
-### 可选层（`.env` 开关，默认开）
+### 可选层（`.env` 开关）
 
-| 开关 | 装上什么 | 量级 |
-|---|---|---|
-| `INSTALL_OFFICE=1` | `libreoffice-core/writer/calc/impress` + `pandoc` | **约 500MB 以上** |
-| `INSTALL_PYTHON_DOCS=1` | 文档生成 `python-pptx` `python-docx` `openpyxl` `Pillow`；数值栈 `numpy` `pandas` `scipy` `matplotlib`；抓取/解析 `requests` `beautifulsoup4` `lxml` `PyYAML` | 约 200–250MB |
-| `INSTALL_CHROME=1` | `google-chrome-stable` 无头 Chrome + 它自己的运行库（nss / gtk3 / cups / alsa / X 库） | 约 500MB |
+| 开关 | 默认 | 装上什么 | 量级 |
+|---|---|---|---|
+| `INSTALL_OFFICE=1` | **开** | `libreoffice-core/writer/calc/impress` + `pandoc` | **约 500MB 以上** |
+| `INSTALL_PYTHON_DOCS=1` | **开** | 文档生成 `python-pptx` `python-docx` `openpyxl` `Pillow`；数值栈 `numpy` `pandas` `scipy` `matplotlib`；抓取/解析 `requests` `beautifulsoup4` `lxml` `PyYAML` | 约 200–250MB |
+| `INSTALL_CHROME=1` | **开** | `google-chrome-stable` 无头 Chrome + 它自己的运行库（nss / gtk3 / cups / alsa / X 库） | 约 500MB |
+| `INSTALL_CUDA=1` | **关** | `g++`(gcc-12) `make` `cmake` 3.25 `ninja-build` `pkg-config` + `nvcc`（CUDA 13）+ `cudart-dev` + Thrust/CUB 头文件 | 约 1GB |
 
 `INSTALL_PYTHON_DOCS` 这个名字比内容窄了：这一层早已不只是文档库（当时只有后面 4 个）。参数名保留是为了不和已有的 `.env` / `compose.yaml` 冲突，读作"Python 库"即可。`matplotlib` 走 Agg 后端（`MPLBACKEND=Agg`），画图直接出文件；中文标签靠上一层已装的 `fonts-noto-cjk`，用前选一下字体：`rcParams['font.sans-serif'] = ['Noto Sans CJK SC']`。
 
@@ -111,6 +112,38 @@ google-chrome --headless=new --no-sandbox --print-to-pdf=/tmp/x.pdf page.html
 **调用方必须自己带两个参数**：`--no-sandbox`（容器里既没有 setuid helper 也没有非特权 user namespace；注意这**不是** dsh 的沙箱——Landlock 约束的是 agent 的 shell，Chrome 是它启动的子进程，仍在约束之内）和 `--disable-dev-shm-usage`（Docker 的 `/dev/shm` 只有 64MB，大页面会崩）。没装 `chromedriver`：puppeteer/playwright 直接说 CDP，Selenium 要的话自己加一行。
 
 设成 `0` 可以瘦身，但**必须重新构建**（`docker compose build && docker compose up -d`）。
+
+### 原生编译工具链 + CUDA（可选，默认**不装**）
+
+`INSTALL_CUDA=1` 是唯一默认关闭的层，因为它对**运行** GUI 毫无用处，只在要**编译**东西时才需要：
+
+```bash
+# .env
+INSTALL_CUDA=1
+CUDA_VERSION=13.0     # 13.0 – 13.5 都行，会被转成 apt 包后缀 13-0
+docker compose build dsh && docker compose up -d
+```
+
+装进去的是：`g++`（Debian 12 的 gcc-12）、`make`、`cmake` 3.25、`ninja-build`、`pkg-config`，以及 NVIDIA 官方 Debian 12 仓库里的三件套 —— `cuda-compiler-13-x`（nvcc / ptxas / cicc / cuobjdump）、`cuda-cudart-dev-13-x`（`cuda_runtime.h` + cudart）、`cuda-cccl-13-x`（Thrust / CUB / libcudacxx）。`nvcc` 落在 `/usr/local/cuda/bin` 且已在 `PATH` 上，`/usr/local/cuda` 这个惯例软链也建好了。
+
+几个刻意的选择：
+
+- **不用 `nvidia/cuda` 基础镜像**。本镜像的底座是 `python:3.11-slim-bookworm`，因为 dsh 的原生依赖（`node-pty`）要 glibc，而且换底座会改变 npm 全局前缀和 uid-1000 那套用户故事。在这里装工具链既保住了原结构，又让它可选。
+- **不装整套 `cuda-toolkit-13-x`**（约 5GB：profiler、nsight、所有数学库）。编译并链接 runtime API 只需要上面三个包。真需要某个数学库（`libcublas-dev-13-x` 之类）时在 Dockerfile 里加一行。
+- **不装驱动，也不需要**。nvcc 是交叉编译器，**没有 GPU 也能编译** CUDA 代码；要**跑**结果仍需宿主机有驱动 + `--gpus all`。
+- **构建期真的编译一次**：不是只打 `nvcc --version`，而是把一个 kernel 编成 PTX（`nvcc -ptx`）。这一步同时验证了宿主编译器、设备头和 CRT 都在位，而 PTX 不需要 GPU，所以空机器上也能通过。
+- **库路径走 `ldconfig`**（写 `/etc/ld.so.conf.d/000-cuda.conf`），不是 `LD_LIBRARY_PATH`：后者在未设置时会让 ENV 里出现一个尾随空项，加载器会把空项当成"当前目录"。
+- 架构按 `dpkg --print-architecture` 选仓库（amd64 → `debian12/x86_64`，arm64 → `debian12/sbsa`），其它架构直接报错退出，而不是留一个 404。
+
+验证：
+
+```bash
+docker compose exec dsh nvcc --version | tail -2
+docker compose exec dsh sh -lc 'g++ --version | head -1; cmake --version | head -1; ninja --version'
+docker compose exec dsh sh -lc 'printf "__global__ void k(void){}\n" > /tmp/k.cu && nvcc -ptx /tmp/k.cu -o /tmp/k.ptx && echo OK'
+```
+
+> `INSTALL_CUDA=0` 时镜像里**没有任何编译器**（连 `gcc` 都没有），这是原先的默认状态：dsh 的原生 npm 包都是预编译产物，不需要编译器。
 
 ### profile 的插件树：0.2.1 起不再投影，运行时解析
 
@@ -148,7 +181,7 @@ LibreOffice 有两点值得说明：
 
 ### 故意不装的
 
-`texlive-*`（几百 MB 起）、`chromium`/`xvfb`（HTML 截图或页面渲染才需要，体积很大）、`build-essential`（dsh 的原生依赖都走预编译 npm 包与 `node-addon-system`，不需要编译器）。
+`texlive-*`（几百 MB 起）、`chromium`/`xvfb`（HTML 截图或页面渲染才需要，体积很大）。`build-essential` 默认也**不装**（dsh 的原生依赖都走预编译 npm 包与 `node-addon-system`，不需要编译器）—— 要编译时用 `INSTALL_CUDA=1` 打开那一层，它会把 g++/cmake/ninja 一起带进来。
 
 > 本机（Windows）没有 Docker，**无法测量确切体积**；上表给的是量级。构建后用 `docker image ls dsh` 看实际大小。
 
@@ -506,6 +539,7 @@ docker compose logs caddy | grep -i -E 'certificate|obtain|error'
 | 4 | 让 agent 执行 `touch /etc/probe` | `[sandbox: file access denied under workspace-write mode]` | 出现 `SANDBOX_UNAVAILABLE` ⇒ 该内核没有 Landlock（启动日志里有 doctor 结论） |
 | 5 | `docker compose logs dsh \| grep 'landlock launcher'` | `full (/usr/.../landlock-run)` | `partial` = 内核 Landlock ABI 偏旧（文件效果仍受限，fail-closed）；`cannot locate` = `DSH_GLOBAL_ROOT` 指错目录 |
 | 6 | `docker compose exec dsh soffice --headless --version`；同理试 `ffmpeg -version`、`pdftotext -v`、`python3 -c "import pptx, pandas, numpy, matplotlib"`、`google-chrome --version`、`fc-list \| grep -ci CJK` | 各自输出版本；CJK 字体数为正 | 检查 `.env` 的 `INSTALL_OFFICE` / `INSTALL_PYTHON_DOCS` / `INSTALL_CHROME` 是否为 1，然后重建镜像 |
+| 6c | 仅在 `INSTALL_CUDA=1` 时：`docker compose exec dsh nvcc --version \| tail -2`；`g++ --version`、`cmake --version`、`ninja --version` | 各自输出版本（CUDA 13.x） | 缺任何一个 ⇒ `.env` 的 `INSTALL_CUDA` 不是 1，或构建没重建；`nvcc: not found` 但层装了 ⇒ 查 `ls -l /usr/local/cuda/bin/nvcc` |
 | 7 | `docker compose logs dsh \| grep 'built-in skills'` | `none in /opt/dsh-skills (mechanism ready; …)`；放了技能后变成计数 | 打出「机制就绪」即算通过：本镜像不带技能 |
 | 8 | 同时开 443 与明文端口时：`curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:<宿主端口>/` | `401` | `403` = `DSH_HTTP_ALLOWED_RANGES` 挡住了（**从服务器自己发起会被挡，属正常**，见下）；`000`/拒绝连接 = compose 里那行 `:80` 映射还没解开，或 caddy 没重建（明文站点本身现在**默认已定义**，见 Caddyfile 末尾） |
 | 9 | 明文用 `http://<authority>:<宿主端口>/`，HTTPS 用 `https://<authority>/` | 两条路各自可用 | `https://…:<明文端口>` **必然失败**：TLS 打到了明文监听上 |
@@ -737,6 +771,10 @@ docker compose up -d --no-build
 | 日志里 `host=127.0.0.1` 或 caddy 502，但容器是 healthy 状态不明 | 容器没探测到非 loopback 地址（少见：`network_mode: none` 或自定义网络无 IPv4）。`docker compose exec dsh ip -4 addr` 确认后，显式设 `DSH_BIND_HOST` 为可用地址，或改用 `network_mode: host`。 |
 | 改了 `DSH_BIND_PORT` 后不通 | `DSH_UPSTREAM` 会跟着变，检查 `docker compose config` 里 caddy 的 `DSH_UPSTREAM` 与 healthcheck。 |
 | 流式响应「卡住」直到最后才一次性吐完 | 检查是否有中间件在缓冲 SSE：`Caddyfile` 的 site 块必须有 `flush_interval -1`（少了它，GUI 的事件流会被攒到最后才发）。 |
+| `INSTALL_CUDA=1` 构建失败，apt 报 `Unable to locate package cuda-compiler-13-x` | `CUDA_VERSION` 写的是 NVIDIA 没为 Debian 12 发布的主线。可用的只有 **13.0 / 13.1 / 13.2 / 13.3 / 13.4 / 13.5**（会被转成 `13-0`…`13-5`）；写 `13` 或 `12.4` 都会失败。 |
+| 同上，报 `no NVIDIA CUDA apt repository for s390x`（或其它架构） | 该架构没有 CUDA 仓库。`amd64` → `x86_64`、`arm64` → `sbsa`，其余只能 `INSTALL_CUDA=0`。 |
+| 构建到 CUDA 那层报 `No space left on device` | 这层约 +1GB（临时占用更高）。`docker system prune` 清一下，或给构建机/runner 更多磁盘；GitHub Actions 上 `slim` 会自动关掉它。 |
+| 容器里 `nvcc: command not found`，但确认构建时 `INSTALL_CUDA=1` | 先 `ls -l /usr/local/cuda/bin/nvcc`；若存在而 `PATH` 里没有，检查镜像是否被旧层覆盖（`docker compose build --no-cache dsh`）。`/usr/local/cuda` 是指向 `/usr/local/cuda-13.x` 的软链，两者都在才对。 |
 
 | `plugin(s) failed to load: @deepseek-ai/dsh-sandbox-local; could not be resolved`（并伴随重启循环）| **0.2.0 及更早**的典型症状：`$DSH_HOME/profiles/node_modules` 里那份从安装树投影出来的符号链接农场过期/残缺，而 profile 自身没有依赖，所以没有任何东西会重建它。0.2.1 起这种投影**不再产生**，该目录只剩 entrypoint 链接的自带插件，因此这条错误若在 0.2.1 上出现，指向的是**镜像里的安装树**（构建期断言本应拦住）或**日志里点名的那个包被 `dsh plugin` 动过**。先看启动日志的 `dsh version` 与 `profile node_modules` 两行：<br>• 有 `found N leftover package link(s)` ⇒ 清一次：`rm -rf data/dsh/profiles/node_modules && docker compose restart dsh`；<br>• 版本与 `.env` 不符 ⇒ `docker compose build --no-cache dsh`；<br>• 全新 home 首启就失败 ⇒ 镜像本身有问题，看构建期冒烟测试的输出。 |
 
