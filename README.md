@@ -57,6 +57,7 @@ Caddy 已经同时承担了**域名虚拟主机、TLS 终结、反向代理**三
 | `workspaces/` | 工作区 bind mount 源目录 |
 | `skills/` | 内置（bundled）技能目录；构建时 COPY 到镜像 `/opt/dsh-skills`。**目前故意为空**，机制已就绪 |
 | `.github/workflows/build-image.yml` | GitHub Actions：lint + 构建镜像并推 GHCR（版本取自 `.env.example`，PR 只构建不推送）。见「用 GitHub Actions 构建镜像」 |
+| `docs/openshift-deployment.md` | **OpenShift 部署手册**：去掉 Caddy、由 Router 做 TLS 与入口，含 PVC/SCC/Route/长连接/沙箱排障。清单在 `docs/openshift/`（`oc apply -k docs/openshift`） |
 | `LICENSE` | Apache License 2.0 全文（与官方文本逐字节一致） |
 
 ## 镜像里预装了什么
@@ -271,6 +272,8 @@ openssl x509 -in caddy-root.crt -noout -subject -issuer
 证书的 SAN 必须包含 `dsh.example.com`（现代客户端只认 SAN，不看 CN）。
 
 ## 快速开始
+
+> 不用 Docker、要部署到 **OpenShift**？看 [`docs/openshift-deployment.md`](docs/openshift-deployment.md) —— 那套方案去掉 Caddy，由 Router 做 TLS 终结与入口，清单在 `docs/openshift/`，一条 `oc apply -k` 即可。
 
 ```bash
 cd dsh-docker

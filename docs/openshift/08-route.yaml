@@ -1,0 +1,42 @@
+# This Route replaces the Caddy service from the compose deployment entirely.
+#
+# Edge termination: the router holds the certificate and talks plain HTTP to the
+# pod. That is all dsh needs — it has no TLS of its own and the cluster's wildcard
+# certificate for *.apps.<cluster> is already trusted by every browser, so the
+# self-signed "click continue" step from the compose setup disappears.
+#
+# ⚠️ `spec.host` MUST equal DSH_TRUSTED_HOSTS in the dsh-config ConfigMap, and
+# both are port-less. They are two halves of the same fact: the router forwards
+# the browser's Host header unchanged, and dsh's /api fence compares it.
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: dsh
+  labels:
+    app.kubernetes.io/name: dsh
+  annotations:
+    # SSE (the event stream) and the WebSocket (/api/remote.mux) are long-lived
+    # and idle for minutes between tokens. The router's 30s default would cut
+    # them; this is the direct equivalent of Caddyfile's `flush_interval -1`.
+    haproxy.router.openshift.io/timeout: 3600s
+    # Optional: keep the agent's UI off the public internet and behind a
+    # known-address allowlist, enforced by the router itself.
+    # haproxy.router.openshift.io/ip_whitelist: 203.0.113.0/24
+spec:
+  # Replace with your own name, or delete this line to let the router generate
+  # dsh-<namespace>.apps.<cluster domain> (then read it back and put it in the
+  # ConfigMap — see the manual).
+  host: dsh.apps.example.com
+  to:
+    kind: Service
+    name: dsh
+    weight: 100
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    # Anyone typing http:// gets bounced to https:// before a cookie is sent.
+    # dsh's own session cookie is NOT marked Secure (it assumes a loopback
+    # origin), so plaintext anywhere on the path would leak it.
+    insecureEdgeTerminationPolicy: Redirect
+  wildcardPolicy: None

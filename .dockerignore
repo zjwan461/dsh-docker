@@ -23,4 +23,5 @@ verify.sh
 # doctor.mjs, patch-client-settings.mjs, plugins/ and skills/).
 articles
 img
+docs
 .github

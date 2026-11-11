@@ -1,0 +1,42 @@
+# `oc apply -k docs/openshift`
+#
+# Files ending in `.example.yaml` are deliberately NOT listed: the static PV and
+# the Secret are created only when the cluster needs them (see the manual).
+#
+# The Route host and DSH_TRUSTED_HOSTS ship as the same placeholder,
+# `dsh.apps.example.com`, so one substitution fixes both:
+#
+#   HOST=dsh.apps.mycluster.example.com
+#   sed -i.bak "s/dsh\.apps\.example\.com/${HOST}/g" \
+#     docs/openshift/04-configmap.yaml docs/openshift/08-route.yaml
+#
+# (GNU sed: `-i` alone; BSD/macOS: `-i ''`.)
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: dsh
+
+resources:
+  - 00-namespace.yaml
+  - 01-serviceaccount.yaml
+  - 03-pvc.yaml
+  - 04-configmap.yaml
+  - 06-deployment.yaml
+  - 07-service.yaml
+  - 08-route.yaml
+  # Enable once the image source is decided:
+  # - 09-buildconfig.yaml
+  # Enable if the cluster enforces NetworkPolicy:
+  # - 10-networkpolicy.yaml
+
+# Swap the image without editing the Deployment. Point newName at whatever you
+# actually push to — the in-cluster registry, GHCR, Quay, …
+#
+# images:
+#   - name: image-registry.openshift-image-registry.svc:5000/dsh/dsh
+#     newName: ghcr.io/zjwan461/dsh-docker
+#     newTag: 0.2.1-rc.5
+
+labels:
+  - includeSelectors: false
+    pairs:
+      app.kubernetes.io/part-of: dsh
