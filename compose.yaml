@@ -19,14 +19,19 @@ x-dsh-image: &dsh-image
       DSH_VERSION: ${DSH_VERSION:-0.2.1-rc.5}
       DSH_UID: ${DSH_UID:-1000}
       DSH_GID: ${DSH_GID:-1000}
-      # Optional image layers. All three default to 1 (installed); set them to 0
-      # in .env to build a leaner image. See README 「镜像里预装了什么」 for the
-      # cost. INSTALL_CHROME=1 is the headless browser (google-chrome-stable);
-      # the call site must still pass --no-sandbox and --disable-dev-shm-usage,
-      # see the Dockerfile.
+      # Optional image layers. The first three default to 1 (installed); set them
+      # to 0 in .env to build a leaner image. See README 「镜像里预装了什么」 for
+      # the cost. INSTALL_CHROME=1 is the headless browser
+      # (google-chrome-stable); the call site must still pass --no-sandbox and
+      # --disable-dev-shm-usage, see the Dockerfile.
       INSTALL_OFFICE: ${INSTALL_OFFICE:-1}
       INSTALL_PYTHON_DOCS: ${INSTALL_PYTHON_DOCS:-1}
       INSTALL_CHROME: ${INSTALL_CHROME:-1}
+      # OFF by default: g++ / cmake / ninja / nvcc (CUDA 13). Roughly +1 GB, and
+      # nothing needs it to run the GUI — it is for the agent to compile CUDA or
+      # C++ itself. See README 「原生编译工具链 + CUDA（可选）」.
+      INSTALL_CUDA: ${INSTALL_CUDA:-0}
+      CUDA_VERSION: ${CUDA_VERSION:-13.0}
   image: dsh:${DSH_VERSION:-0.2.1-rc.5}
 
 services:

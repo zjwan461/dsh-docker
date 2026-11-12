@@ -1,0 +1,182 @@
+# The dsh server.
+#
+# Differences from the docker-compose deployment, all forced by the platform:
+#
+#   * no Caddy. The OpenShift router terminates TLS and forwards plain HTTP to
+#     the Service, so the container publishes nothing and needs no certificate.
+#   * the pod does not bind 0.0.0.0 (dsh 0.2.1 rejects wildcards). DSH_BIND_HOST
+#     is "auto", so the server listens on the POD's own IPv4 — which is exactly
+#     the address the Service DNATs to.
+#   * TWO volumes instead of one bind mount, and both are claims, because a pod
+#     can be rescheduled onto another node at any time.
+#
+# Everything is a plain apps/v1 Deployment (not DeploymentConfig): the latter is
+# deprecated and adds nothing here — there is no ImageStream trigger to rely on
+# when the image comes from an external registry.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dsh
+  labels:
+    app.kubernetes.io/name: dsh
+spec:
+  replicas: 1
+  # ⚠️ NEVER scale this to 2. Two pods would mount the same ReadWriteOnce volume
+  # and both would write $DSH_HOME/profiles and the session store. Recreate also
+  # guarantees the old pod is gone before the new one mounts the volume.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: dsh
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: dsh
+    spec:
+      serviceAccountName: dsh
+      # tini is PID 1 inside the image and forwards SIGTERM; dsh drains its
+      # plugin tree for up to 5s. 30 gives it room without stalling rollouts.
+      terminationGracePeriodSeconds: 30
+
+      # The image is built with DSH_UID=1000 (its own `node` user). Pinning the
+      # same UID here matters for more than tidiness: $DSH_HOME/.credentials.yaml
+      # must be owned by the running user, because dsh chmods it to 0600 at start
+      # and chmod requires ownership. Under a random UID the file arrives owned by
+      # root:fsGroup and the container would die with "this container cannot
+      # chmod it". fsGroup 1000 makes the volume group-writable for that user.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        # Do not recursively chown a 20Gi workspace on every mount.
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+
+      initContainers:
+        # Seed $DSH_HOME/settings.yaml once. Reusing the dsh image avoids pulling
+        # a second image just for `cp`, and it already runs as the right user.
+        - name: seed-settings
+          image: image-registry.openshift-image-registry.svc:5000/dsh/dsh:latest
+          imagePullPolicy: Always
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              if [ -f /data/dsh/settings.yaml ]; then
+                echo 'settings.yaml already on the volume; leaving it alone'
+              else
+                cp /seed/settings.yaml /data/dsh/settings.yaml
+                echo 'seeded /data/dsh/settings.yaml from the dsh-settings-seed ConfigMap'
+              fi
+          volumeMounts:
+            - name: home
+              mountPath: /data/dsh
+            - name: seed
+              mountPath: /seed
+              readOnly: true
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { memory: 128Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+
+      containers:
+        - name: dsh
+          image: image-registry.openshift-image-registry.svc:5000/dsh/dsh:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 3080
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: dsh-config
+          env:
+            # Both optional: the GUI starts without them and the Models page can
+            # store credentials on the volume instead.
+            - name: DEEPSEEK_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: dsh-secrets
+                  key: DEEPSEEK_API_KEY
+                  optional: true
+            - name: LITELLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: dsh-secrets
+                  key: LITELLM_API_KEY
+                  optional: true
+          volumeMounts:
+            - name: home
+              mountPath: /data/dsh
+            - name: workspaces
+              mountPath: /workspaces
+            # The image writes probes, patch staging files and spill files under
+            # /tmp. An emptyDir keeps that off the container layer, which is what
+            # makes readOnlyRootFilesystem possible below.
+            - name: tmp
+              mountPath: /tmp
+
+          # ⚠️ tcpSocket, NOT httpGet. A healthy dsh answers GET / with 401 (the
+          # browser has no session yet), and Kubernetes counts only 2xx/3xx as a
+          # successful httpGet — a 401 probe would kill a perfectly good pod on
+          # every check. A TCP connect proves the listener is up, and a failed
+          # plugin tree exits the process, which closes it.
+          #
+          # The first start composes the profile, chmods credentials and builds
+          # the plugin graph: budget a minute, not ten seconds.
+          startupProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 5
+            failureThreshold: 36
+          readinessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          resources:
+            # The agent shells out to soffice/ffmpeg/python and the Node side holds
+            # the whole plugin tree; a 512Mi limit would OOM during conversions.
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "4"
+              memory: 6Gi
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            # Optional hardening. It works because /tmp is an emptyDir and the
+            # image never writes elsewhere except the two volumes — but any tool
+            # the agent installs at run time would fail. Flip it on deliberately.
+            readOnlyRootFilesystem: false
+
+      volumes:
+        - name: home
+          persistentVolumeClaim:
+            claimName: dsh-home
+        - name: workspaces
+          persistentVolumeClaim:
+            claimName: dsh-workspaces
+        - name: seed
+          configMap:
+            name: dsh-settings-seed
+        - name: tmp
+          emptyDir: {}

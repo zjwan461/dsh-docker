@@ -357,6 +357,108 @@ RUN set -eux; \
       echo 'INSTALL_PYTHON_DOCS=0: document-generation and numeric libraries are NOT in this image'; \
     fi
 
+# ── native build toolchain + CUDA (switchable, OFF by default) ──────────────
+# Build with --build-arg INSTALL_CUDA=1 (or INSTALL_CUDA=1 in .env) to add:
+#   g++ / gcc / make / binutils   (build-essential, Debian's gcc-12)
+#   cmake                          (Debian 12 ships 3.25)
+#   ninja-build, pkg-config        (what CUDA extensions and llama.cpp expect)
+#   nvcc + CUDA 13 headers/runtime (from NVIDIA's own Debian 12 apt repository)
+#
+# WHY IT IS OFF BY DEFAULT: this layer costs roughly a gigabyte, and none of it
+# is needed to RUN the GUI. It is for the agent's own work — compiling a CUDA
+# kernel, building a C++ extension, `nvcc -ptx` on a source file — and the base
+# image deliberately has no compiler (dsh's native npm pieces are prebuilt).
+#
+# WHY NOT nvidia/cuda BASE IMAGE: this Dockerfile is built on python:3.11-slim-
+# bookworm because dsh's native dependencies (node-pty) need glibc, and switching
+# base images would change the npm prefix and the uid-1000 user story. Installing
+# the toolkit here keeps that arrangement intact and keeps the layer optional.
+#
+# WHAT OF CUDA IS INSTALLED, and why not the whole toolkit: `cuda-toolkit-13-x`
+# is ~5 GB (profiler, nsight, every math library). Compiling and linking against
+# the runtime API needs three packages, so those are what this pulls:
+#   cuda-compiler-13-x     nvcc, ptxas, the cicc front end, cuobjdump
+#   cuda-cudart-dev-13-x   cuda_runtime.h + static/shared cudart
+#   cuda-cccl-13-x         Thrust / CUB / libcudacxx headers
+# Add cuda-nvrtc-dev / libcublas-dev etc. here if a specific build asks for them.
+#
+# NO DRIVER IS INSTALLED and none is needed: nvcc is a cross compiler, so this
+# image can BUILD CUDA code with no GPU present. Running the result still needs
+# `--gpus all` on a host with a driver.
+#
+# CUDA_VERSION pins the minor line and becomes the apt package suffix (13.0 ->
+# 13-0). NVIDIA publishes 13.0 through 13.5 for Debian 12; override to move.
+#
+# THREE IMPLEMENTATION DETAILS worth keeping:
+#   * the keyring .deb is architecture-specific (x86_64 vs sbsa), and there is
+#     no repository at all for other architectures, so an unknown arch fails
+#     here with a message instead of a confusing 404;
+#   * these three packages do not all pull in the /usr/local/cuda alternatives
+#     symlink that the full toolkit creates, so it is made explicitly — every
+#     build script in the wild looks in /usr/local/cuda;
+#   * the library path is registered with ldconfig rather than through
+#     LD_LIBRARY_PATH. An unset LD_LIBRARY_PATH would make an ENV line collapse
+#     to a trailing empty entry, which the loader treats as "current directory".
+#
+# The smoke test is a real compile (a kernel to PTX), not just --version: nvcc
+# needs a working host compiler, the device headers and the CRT, and that one
+# command proves all three. PTX needs no GPU, so it is valid on any builder.
+ARG INSTALL_CUDA=0
+ARG CUDA_VERSION=13.0
+RUN set -eux; \
+    if [ "${INSTALL_CUDA}" = "1" ]; then \
+      apt-get update; \
+      apt-get install -y --no-install-recommends \
+        build-essential \
+        g++ \
+        gcc \
+        make \
+        cmake \
+        ninja-build \
+        pkg-config; \
+      rm -rf /var/lib/apt/lists/*; \
+      case "$(dpkg --print-architecture)" in \
+        amd64) cuda_repo='debian12/x86_64' ;; \
+        arm64) cuda_repo='debian12/sbsa' ;; \
+        *) echo "ERROR: no NVIDIA CUDA apt repository for $(dpkg --print-architecture); build with INSTALL_CUDA=0 instead"; exit 1 ;; \
+      esac; \
+      curl -fsSL "https://developer.download.nvidia.com/compute/cuda/repos/${cuda_repo}/cuda-keyring_1.1-1_all.deb" -o /tmp/cuda-keyring.deb; \
+      dpkg -i /tmp/cuda-keyring.deb; \
+      rm -f /tmp/cuda-keyring.deb; \
+      apt-get update; \
+      suffix="$(echo "${CUDA_VERSION}" | tr '.' '-')"; \
+      apt-get install -y --no-install-recommends \
+        "cuda-compiler-${suffix}" \
+        "cuda-cudart-dev-${suffix}" \
+        "cuda-cccl-${suffix}"; \
+      rm -rf /var/lib/apt/lists/*; \
+      if [ ! -e /usr/local/cuda ] && [ -d "/usr/local/cuda-${CUDA_VERSION}" ]; then \
+        ln -sfn "/usr/local/cuda-${CUDA_VERSION}" /usr/local/cuda; \
+      fi; \
+      echo '/usr/local/cuda/lib64' > /etc/ld.so.conf.d/000-cuda.conf; \
+      ldconfig; \
+      echo '--- host toolchain ---'; \
+      g++ --version | head -n 1; \
+      cmake --version | head -n 1; \
+      ninja --version; \
+      pkg-config --version; \
+      echo '--- nvcc ---'; \
+      nvcc --version | tail -n 2; \
+      printf '__global__ void dsh_smoke(int *p) { *p = 1; }\n' > /tmp/dsh-cuda-smoke.cu; \
+      nvcc -ptx /tmp/dsh-cuda-smoke.cu -o /tmp/dsh-cuda-smoke.ptx; \
+      test -s /tmp/dsh-cuda-smoke.ptx; \
+      head -n 3 /tmp/dsh-cuda-smoke.ptx; \
+      rm -f /tmp/dsh-cuda-smoke.cu /tmp/dsh-cuda-smoke.ptx; \
+      echo "CUDA ${CUDA_VERSION} toolchain compiled a kernel to PTX"; \
+    else \
+      echo 'INSTALL_CUDA=0: no compiler and no CUDA in this image (nvcc/cmake/g++ are absent)'; \
+    fi
+
+# On PATH unconditionally: a PATH entry that does not exist is harmless, and ENV
+# cannot be made conditional. Without it the agent finds nvcc only by guessing at
+# /usr/local/cuda-13.0/bin.
+ENV PATH="/usr/local/cuda/bin:${PATH}"
+
 # ── Node.js 22 ──────────────────────────────────────────────────────────────
 # The NodeSource setup script imports its signing key itself (dearmor), so no
 # gnupg package is required on the image.

@@ -1,0 +1,53 @@
+# OPTIONAL — only for clusters WITHOUT a dynamic provisioner, or when the
+# storage must be pinned to a specific NFS export / disk. If your cluster has a
+# default StorageClass (AWS gp3-csi, ODF ceph-rbd, vSphere CSI, …) skip this
+# file entirely: 03-pvc.yaml will provision on demand.
+#
+# Read-write-once is the requirement: dsh keeps its SQLite-free JSON state, the
+# profile tree and .credentials.yaml under $DSH_HOME, and a second writer would
+# corrupt them. The Deployment also uses strategy Recreate for the same reason.
+#
+# Two things to adapt below:
+#   * capacity must be <= the export's/disk's real size;
+#   * accessModes for NFS is ReadWriteMany (many clients), while a block device
+#     (local, iSCSI, cloud disk) is ReadWriteOnce. Use RWO unless you share NFS.
+#
+# Then in 03-pvc.yaml set:
+#   storageClassName: ""        # no dynamic provisioning
+#   volumeName: dsh-home-pv     # bind to this exact PV
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: dsh-home-pv
+  labels:
+    app.kubernetes.io/name: dsh
+spec:
+  capacity:
+    storage: 10Gi
+  accessModes:
+    - ReadWriteOnce
+  # Retain: deleting the PVC must NOT delete the user's sessions and settings.
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  # NFS example — replace with your export, or swap this whole block for
+  # hostPath / local / iscsi / csi as appropriate.
+  nfs:
+    server: nfs.example.com
+    path: /exports/dsh-home
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: dsh-workspaces-pv
+  labels:
+    app.kubernetes.io/name: dsh
+spec:
+  capacity:
+    storage: 20Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  nfs:
+    server: nfs.example.com
+    path: /exports/dsh-workspaces

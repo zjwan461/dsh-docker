@@ -1,0 +1,71 @@
+# OPTIONAL — build the image inside the cluster instead of pushing one in.
+#
+# The build needs egress to: deb.nodesource.com, registry.npmjs.org,
+# deb.debian.org, dl.google.com (Chrome), developer.download.nvidia.com (only
+# when INSTALL_CUDA=1). On a cluster behind a proxy, configure the build
+# environment as well, or import a prebuilt image instead (see the manual).
+#
+#   oc apply -f docs/openshift/09-buildconfig.yaml
+#   oc start-build dsh -n dsh --follow
+#
+# The first build takes 20-40 minutes; later ones reuse the source layer but not
+# the apt/npm layers unless the build cache is configured
+# (buildDefaults/buildOverrides with a persistent build cache — cluster-admin).
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: dsh
+  labels:
+    app.kubernetes.io/name: dsh
+spec:
+  source:
+    type: Git
+    git:
+      uri: https://github.com/zjwan461/dsh-docker.git
+      ref: main
+    # A clean build context: .dockerignore already keeps .env, data/, workspaces/
+    # and img/ out of it.
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Dockerfile
+      buildArgs:
+        - name: DSH_VERSION
+          value: "0.2.1-rc.5"
+        - name: DSH_UID
+          value: "1000"
+        - name: DSH_GID
+          value: "1000"
+        - name: INSTALL_OFFICE
+          value: "1"
+        - name: INSTALL_PYTHON_DOCS
+          value: "1"
+        - name: INSTALL_CHROME
+          value: "1"
+        # Keep this off unless the agent must compile CUDA/C++ itself: it is
+        # ~+1 GB and the build then depends on NVIDIA's apt repository.
+        - name: INSTALL_CUDA
+          value: "0"
+  output:
+    to:
+      kind: ImageStreamTag
+      name: dsh:latest
+  # ConfigChange builds only when you ask. ImageChange makes a base-image update
+  # trigger a rebuild, which for a pinned python:3.11-slim-bookworm is fine.
+  triggers:
+    - type: ConfigChange
+    - type: ImageChange
+      imageChange: {}
+---
+# The output stream. Its internal-registry address is what the Deployment's
+# `image:` points at:
+#   image-registry.openshift-image-registry.svc:5000/dsh/dsh:latest
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: dsh
+  labels:
+    app.kubernetes.io/name: dsh
+spec:
+  lookupPolicy:
+    local: true

@@ -1,0 +1,18 @@
+# ClusterIP only: the router reaches it, nothing else needs to. There is no
+# NodePort and no LoadBalancer — the Route is the entry point, and exposing a
+# second path in would bypass the trusted-host fence's assumptions.
+apiVersion: v1
+kind: Service
+metadata:
+  name: dsh
+  labels:
+    app.kubernetes.io/name: dsh
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: dsh
+  ports:
+    - name: http
+      port: 3080
+      targetPort: http
+      protocol: TCP

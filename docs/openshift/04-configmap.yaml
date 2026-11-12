@@ -1,0 +1,84 @@
+# Runtime configuration for the dsh container, plus the SEED of settings.yaml.
+#
+# ⚠️ THE ONE VALUE THAT MUST MATCH THE ROUTE: DSH_TRUSTED_HOSTS.
+# It is the authority the BROWSER puts in the Host header. On OpenShift that is
+# the Route host, port-less (browsers omit :443). Write `dsh.apps.example.com`,
+# never `dsh.apps.example.com:443` — an entry with a port is compared as
+# host:port and would never match. A mismatch is not subtle: every /api request
+# (and therefore the whole UI) answers 403.
+#
+# Everything under `data` becomes an environment variable. Names starting with
+# DSH_ that must be REAL environment variables (not a .env file inside the
+# container) are exactly these, which is why they belong here and not in a
+# mounted file.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dsh-config
+  labels:
+    app.kubernetes.io/name: dsh
+data:
+  # Where the GUI keeps its state. Must be the PVC mount point.
+  DSH_HOME: /data/dsh
+  # auto = bind this POD's own IPv4. Do NOT set 0.0.0.0: dsh 0.2.1 rejects a
+  # wildcard in the webserver row's schema and the container refuses to start.
+  # The Service targets the pod IP anyway, so "auto" is the correct answer here
+  # exactly as it is under docker compose.
+  DSH_BIND_HOST: auto
+  DSH_BIND_PORT: "3080"
+  # ⚠️ MUST equal the Route host below. Several authorities (the apps host plus
+  # an internal alias) go on one line, comma-separated — each still port-less:
+  #   DSH_TRUSTED_HOSTS: dsh.apps.example.com,dsh.internal
+  DSH_TRUSTED_HOSTS: dsh.apps.example.com
+  # read-only | workspace-write | danger-full-access
+  DSH_PERMISSION_MODE: workspace-write
+  DSH_TELEMETRY_DISABLED: "1"
+  # Bundled plugins baked into the image (/opt/dsh-plugins), enabled at start.
+  DSH_PLUGIN_ROOT: /opt/dsh-plugins
+  # OpenShift injects the cluster-wide proxy into pods as HTTP(S)_PROXY. Without
+  # a NO_PROXY that covers the pod network, the container's own probes and the
+  # agent's internal calls would be sent to the proxy. 10.0.0.0/8 covers the
+  # default OpenShift pod/service ranges; widen it if your cluster differs.
+  NO_PROXY: 127.0.0.1,localhost,.cluster.local,.svc,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
+  no_proxy: 127.0.0.1,localhost,.cluster.local,.svc,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
+  TZ: UTC
+---
+# The SEED for $DSH_HOME/settings.yaml. An initContainer copies it onto the PVC
+# only when the PVC has no settings.yaml yet, so:
+#   * first start gets the mock configuration (so the Models page has something
+#     to show);
+#   * later starts never overwrite edits made in the UI or on the volume.
+#
+# Replace this with your own document. The full annotated example lives at
+# data/dsh/settings.yaml in the repository — copy it over this one.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dsh-settings-seed
+  labels:
+    app.kubernetes.io/name: dsh
+data:
+  settings.yaml: |
+    # DeepSeek Harness user-settings document (seed).
+    # Edited by the Models page at run time; that write lands on the PVC, not here.
+    llm-deepseek:
+      apiKeyEnv: DEEPSEEK_API_KEY
+
+    llm-pi-ai:
+      providers:
+        vllm-local:
+          displayName: Internal gateway
+          api: openai-completions
+          baseURL: http://put-your-api-endpoint-here/v1
+          apiKeyEnv: LITELLM_API_KEY
+          models:
+            - id: example-model
+              name: example-model
+              contextWindow: 1010000
+              maxTokens: 131072
+              # text | image. Omit it and the model is treated as text-only.
+              input: [text, image]
+
+    # agent-default-model:
+    #   provider: vllm-local
+    #   model: example-model

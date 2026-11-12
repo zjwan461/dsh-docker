@@ -1,0 +1,43 @@
+# OPTIONAL hardening. Apply only if the cluster enforces NetworkPolicy (OVN-Kubernetes
+# / OpenShift SDN with policy enabled); otherwise it is inert but harmless.
+#
+# Ingress: only the router may reach the pod. Everything else — other namespaces,
+# the whole cluster — is denied. Note the router runs in `openshift-ingress`, and
+# OVN-Kubernetes also needs `openshift-ingress-operator` allowed to reach the
+# router, but that hop is already permitted by the platform's own policies.
+#
+# Egress: deliberately unrestricted. The agent must reach model endpoints, the
+# web, and whatever the user's workspace talks to. If your platform requires
+# egress lockdown, add an egress section — and remember web_search, the model
+# providers and any git remote then need explicit allows.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: dsh-allow-router-only
+  labels:
+    app.kubernetes.io/name: dsh
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: dsh
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        # The OpenShift ingress routers.
+        - namespaceSelector:
+            matchLabels:
+              network.openshift.io/policy-group: ingress
+      ports:
+        - protocol: TCP
+          port: 3080
+    # kubelet probes come from the node itself, not from a pod, so they are not
+    # subject to this policy's pod selectors — no extra rule needed for them.
+    # Health checks from other monitoring namespaces would need one; add:
+    # - from:
+    #     - namespaceSelector:
+    #         matchLabels:
+    #           kubernetes.io/metadata.name: openshift-monitoring
+    #   ports:
+    #     - protocol: TCP
+    #       port: 3080

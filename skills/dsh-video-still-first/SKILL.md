@@ -334,3 +334,87 @@ run 脚本常靠"文件存在就跳过"来断点续跑。改了 11 条提示词�
 剩下 5 条旧素材直接进了成片。
 
 **规矩**：改完先列受影响清单 → 逐个 `rm` 对应素材 → 重跑 → 核对时间戳。
+
+## 7. 让成片不像 PPT：分镜连续性（行业通行做法）
+
+这一节来自两个成熟开源项目：[LibTV-Skill](https://github.com/wanmeishaonian/LibTV-Skill)
+（AI 分镜表规范）和 [drama-skills](https://github.com/zenstory-ai/drama-skills)
+（漫剧工作室十步产线）。它们解决的是同一个问题：**每条镜头单独看都行，剪在一起就散。**
+
+### 7.1 单镜八段配方
+
+```
+静态锚点 → 起点 → 触发 → 主体动作 → 次级反应 → 运镜 → 声音 → 终点
+```
+
+缺任意一段，模型就会用它自己的默认值填空。**最容易漏也最致命的是「运镜」和「终点」。**
+
+### 7.2 运镜留空 = 允许漂移
+
+`drama-skills` 原话：*"摄影机一栏空着会被执行端读成可以自由漂移，于是本该稳住的镜头
+长出一次没人要过的推近或环绕。"*
+
+**锁死镜头至少写三件**：写死的取景（景别/机位高度/轴线哪侧）＋ 画面里还有什么在动 ＋ 保持多久。
+
+> 反例：`fixed camera`
+> 正例：`Locked-off medium shot, eye level, camera on his right side of the axis. Nothing moves
+> except his breathing, the candle flames behind him and the dust in the light. Held still.`
+
+**运动镜头至少写五件**：起始取景 / 何时因何开始 / 路径节奏 / 跟谁或揭示什么 / 结束取景。
+
+> 反例：`slow push in`
+> 正例：`The camera pushes in slowly from a wide view, starts on the first frame, travels about
+> one metre, and stops exactly when the line is spoken, ending chest-up, still axis left.`
+
+锁死与运动不能同时统治同一区间，除非用时间分段写清切换点。
+
+### 7.3 接缝四字段
+
+每条镜头都要能回答，且与相邻镜对齐：
+
+| 字段 | 说明 |
+|---|---|
+| 位置 | 站/坐/跪，画面左中右 |
+| 目光 | 看谁、看哪里 |
+| 双手 | 在做什么、抓着什么 |
+| 持物 | 手里/身上有什么 |
+
+提示词里显式写 `Start state:` 与 `End state:`。**不许用"保持连续"糊过去**——位置对不上，
+观众立刻出戏。这就是"像 PPT"最主要的来源。
+
+### 7.4 环境底声必须跨镜相接
+
+*"每个单镜各自生成一段自己的房间底噪，剪在一起每个切点都『呼』一声换空间。
+这个缺陷在单镜文本里永远看不出问题，只有素材相接时才暴露。"*
+
+同一场次内，每条镜头的环境声写**同一句**并声明延续：
+
+```
+The same courtyard at dusk: low wind through the eaves, one distant bird, dry rustle of silk.
+This ambience continues unchanged from the previous shot and must not restart or change.
+```
+
+### 7.5 情绪写动作，不写形容词
+
+| 别写 | 写 |
+|---|---|
+| 他很悲伤 | 眉头收紧，嘴角向下，手指在袖中蜷起 |
+| 他愤怒 | 下颌绷紧，鼻翼张合，眼睛一眨不眨 |
+
+### 7.6 一镜一个主要变化
+
+同时要求两个互斥动作（既锁死又跟随、既左摇又右摇），模型只会随机挑一个做。
+
+### 7.7 首尾帧插值不保证中间发生什么
+
+给首尾帧等于说"两端对得上就行"。**动作路径本身就是戏**的镜头（夺取、跟随、逼近）
+不要交给首尾帧夹逼——要么把动作移到某一端，要么拆镜。
+
+### 7.8 生成前检查清单
+
+- [ ] 角色描述完整且与上一镜一致（年龄/五官/发型/服装/标志物）
+- [ ] 场景环境特征与上一镜一致（时间/光线/陈设）
+- [ ] 上一镜终点 = 本镜起点（位置/目光/双手/持物）
+- [ ] 运镜写清了锁死或运动的要素
+- [ ] 环境声写明延续或变化
+- [ ] 本镜只有一个主要变化

@@ -1,0 +1,42 @@
+# Two claims, on purpose:
+#
+#   dsh-home        $DSH_HOME — settings.yaml, .credentials.yaml, profiles/,
+#                   sessions/, logs/. Small but precious: this is the state a
+#                   backup has to capture.
+#   dsh-workspaces  /workspaces — the agent's working directory, where every
+#                   file it produces lands. Grows without bound.
+#
+# Why not one volume: the workspace can be wiped or grown independently, and the
+# agent's sandbox is rooted at /workspaces, so keeping the two apart keeps a
+# runaway build from filling the volume that holds the login cookie secret.
+#
+# needs: ReadWriteOnce. The Deployment is Recreate, never two pods at once.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: dsh-home
+  labels:
+    app.kubernetes.io/name: dsh
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  # Leave this out for dynamic provisioning. Uncomment (and set volumeName)
+  # only when using 02-pv-static.example.yaml.
+  # storageClassName: ""
+  # volumeName: dsh-home-pv
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: dsh-workspaces
+  labels:
+    app.kubernetes.io/name: dsh
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi

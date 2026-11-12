@@ -1,0 +1,14 @@
+# Everything below lives in this namespace.
+#
+# `oc new-project dsh` also works and is usually preferable (it sets your
+# current context too); this file exists so `oc apply -k docs/openshift` is
+# self-contained, and so the namespace carries a display name in the console.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dsh
+  labels:
+    app.kubernetes.io/name: dsh
+  annotations:
+    openshift.io/display-name: DeepSeek Harness
+    openshift.io/description: DeepSeek Harness (dsh) Web GUI
