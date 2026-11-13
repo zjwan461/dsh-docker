@@ -137,7 +137,7 @@
       }
     },
     "12": {
-      "class_type": "VAEDecode",
+      "class_type": "VAEDecodeAudio",
       "inputs": {
         "samples": [
           "10",

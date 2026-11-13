@@ -235,3 +235,19 @@ no text, no captions, no logos.
 - **Seedance 2.x 明确拒绝含真人的参考图/参考视频**（`may contain real person`），所以"真人换脸"在那边走不通。
 - **首帧与参考图不能混用**：一次请求只能是 `image`（或+`last_frame`），不能同时带 `reference_images`。
 - 每次提交都是新渲染，重提会重复计费。
+
+### 12.7 实测（2026-11-13，端到端跑通）
+
+两步都成功，全程低清：
+
+1. **编辑**（`image/E1-首帧重建-Qwen编辑.json`，Qwen-Image-Edit-2509 fp8，20 步）：把外星人放进原布景，灰背景/发光外套保留，~80 秒。
+2. **i2v**（`h3/h3_i2v_api.json`，73f/3.04s/864×480）：呼吸、缓慢转头、额头印记发光，身份与布景稳定，~4 分钟。
+
+**两个必踩的坑**：
+
+| 坑 | 正确 |
+|---|---|
+| 音频解码用 `VAEDecode` | 必须 `VAEDecodeAudio`（`VAEDecode` 出 IMAGE，接 `CreateVideo.audio` 会报类型不匹配）。官方三套模板已修 |
+| 上传后文件名带序号 | 上传 `firstframe.png` 实际存成 `firstframe_00001_.png`，`LoadImage` 要写**带序号的全名** |
+
+**模型不完整会直接在 UNETLoader 报错**（"Tensor extends past the end of the file"）——下载没完就提交会浪费一次排队；先 `ls -l` 对字节数再跑。

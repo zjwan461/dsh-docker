@@ -87,5 +87,7 @@ python scripts/comfy.py --base $B download --id <PID> --out out/
 - 模型路径必须带 `minimax/` 前缀（服务器上的实际子目录）。
 - `SaveVideo.format="auto"`；`CreateVideo.fps=24`。
 - r2v 的参考图是**列表**：`"ref_images": [["16", 0]]`（不是 `ref_image_0`）。
+- **音频解码用 `VAEDecodeAudio`**，不是 `VAEDecode`（后者出 IMAGE，接 `CreateVideo.audio` 报类型不匹配）。
+- 上传后的文件名带序号（`x.png` → `x_00001_.png`），`LoadImage` 要写带序号全名。
 - 官方模板默认 20 步、无 LoRA；turbo 是可选项，不是默认。
 - 社区工作流的模型名可能与你的服务器不同，先 `validate` 再提交。

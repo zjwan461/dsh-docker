@@ -58,6 +58,11 @@
 4s / 480×864 / 0.4MP / turbo 4step：**跑通**。107 帧、4.458s、48k 音轨，身份稳定、嘴型随音频开合，耗时 ~5 分钟。
 坑：`ref_images` 必须走 `ZealmanH3LoadImageToRefImages` 的 bundle；音频路径要带子目录；可整条删掉 whisper 转录链直接给 prompt；分辨率用 `WJILatentPreset` 自定义 480×864。详见 `talking-head.md` §2.1。
 
+## 6.6 换脸路线 E（首帧重建，端到端）
+
+编辑（Qwen-Image-Edit-2509 fp8，20 步，~80s）→ i2v（73f/3.04s/864×480，~4min）：外星人进原布景，呼吸/转头/印记发光，身份稳定。
+坑：音频解码必须 `VAEDecodeAudio`；上传文件名带序号；模型没下完会在 UNETLoader 报 "extends past end of file"。详见 `face-swap.md` §12.7。
+
 ## 7. 换脸（Character Swap LoRA）
 
 - 三个 LoRA（character_swap v1.1 / head_swap v1.0 / preprocessor_map）**装好即被识别**，无需重启。
