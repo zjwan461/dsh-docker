@@ -17,6 +17,7 @@ RATE=20M COMFY_ROOT=/path/to/ComfyUI bash references/workflows/fetch-models.sh
 脚本行为：
 
 - 只下**缺失**的（`[ -f "$DEST" ]` 跳过）；
+- **有 sha256 的会自动校验**（manifest 里 `sha256` 字段；目前 2 个，其余可自行补），不符会喊 `HASH MISMATCH`；
 - `curl -L --fail --retry 3 -C - --limit-rate "$RATE"`：断点续传、限速、失败不中断；
 - 保留工作流里写的子目录（`minimax/xxx`、`Ltx/xxx`），因为服务器就是这么放的；
 - 目标目录由节点类型决定：`unet_name→diffusion_models`、`clip_name→text_encoders`、`vae_name→vae`、`lora_name→loras`、`ckpt_name→checkpoints`。

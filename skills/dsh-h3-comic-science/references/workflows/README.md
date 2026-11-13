@@ -36,6 +36,7 @@ workflows/
 | `B13-角色多角度.json` | Qwen-Image-Edit 多角度并行（三视图/多机位） |
 | `C19-三视图zimage双采.json` | Z-Image + 本地 LLM 扩写 + 双采 |
 | `T4-Krea2三视图.json` | Krea2 角色三视图 |
+| `E1-首帧重建-Qwen编辑.json` | **换脸路线 E 第一步**：人像+原布景 → 新首帧（Qwen-Image-Edit 2509） |
 
 ### video/
 

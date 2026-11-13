@@ -1,7 +1,7 @@
 ---
 name: dsh-h3-comic-science
-description: 用 MiniMax H3 做三类平台爆款——**AI 漫剧**、**AI 换脸/重演**（rapper swap、世界巡演）、**外星人科普**，也能脱离插件直连 ComfyUI 跑任意工作流。含**决策入口**（静态还是动态、原生口播还是 TTS、用不用 H3）、**H3 官方语法**（三段/六段、`<d>` 台词、`(S1)` 说话人、17k+5 帧、cfg=1 无负面词）、**通用镜头工艺**（多人站位与闭嘴锁、因果式运镜、八种转场、武打六拍、Hub/Chain 长片连续性、换脸、T8 管线）、**三条产线**（漫剧 / 换脸重演 / 科普）、**声音**（原生口播情绪、TTS 分工、FishAudio 克隆、对口型、BGM 无分轨与闪避、字幕路线）、**后期质检**（finish/qa/seam）与 **LoRA 目录**。附 22 套随包 API 工作流、`fetch-models.sh` 权重下载脚本与纯标准库客户端 `comfy.py`。用户要做漫剧/科普/分镜/换脸/口播/长片，或在 ComfyUI 上跑 H3、Wan、LTX、Qwen 生图时加载。
-whenToUse: 用户要做 AI 漫剧、动态漫、竖屏短剧；要做 AI 换脸/重演（演唱会换脸、rapper swap、影视片段换人）；要做"外星人给地球人讲知识"这类双人对话科普；要做口播数字人、亲情向、动作迁移、歌词 MV、四宫格分镜；要写分镜、台词、站位、运镜、转场、打戏；要决定静态漫还是动态漫、原生口播还是 TTS；要做换脸/人物替换；要跑 T8/U22/U24、Wan 首尾帧、LTX MSR 等高级工作流；要脱离插件直连 ComfyUI 提交任务、查状态、取成品；要排查画风漂移、口型错人、声线不分、台词被截、字幕自现、打斗发软、成片削波。
+description: 用 MiniMax H3 做四类平台爆款——**AI 漫剧**、**AI 短剧**（红果/抖音，80 集竖屏连续剧）、**AI 换脸/重演**（rapper swap、世界巡演）、**外星人科普**，也能脱离插件直连 ComfyUI 跑任意工作流。含**决策入口**（静态还是动态、原生口播还是 TTS、用不用 H3）、**H3 官方语法**（三段/六段、`<d>` 台词、`(S1)` 说话人、17k+5 帧、cfg=1 无负面词）、**通用镜头工艺**（多人站位与闭嘴锁、因果式运镜、八种转场、武打六拍、Hub/Chain 长片连续性、换脸、T8 管线）、**三条产线**（漫剧 / 换脸重演 / 科普）、**声音**（原生口播情绪、TTS 分工、FishAudio 克隆、对口型、BGM 无分轨与闪避、字幕路线）、**后期质检**（finish/qa/seam）与 **LoRA 目录**。附 22 套随包 API 工作流、`fetch-models.sh` 权重下载脚本与纯标准库客户端 `comfy.py`。用户要做漫剧/科普/分镜/换脸/口播/长片，或在 ComfyUI 上跑 H3、Wan、LTX、Qwen 生图时加载。
+whenToUse: 用户要做 AI 漫剧、动态漫、竖屏短剧；要做红果/抖音类 AI 短剧（80 集、90–120 秒一集、付费卡点、断章）；要做 AI 换脸/重演（演唱会换脸、rapper swap、影视片段换人）；要做"外星人给地球人讲知识"这类双人对话科普；要做口播数字人、亲情向、动作迁移、歌词 MV、四宫格分镜；要写分镜、台词、站位、运镜、转场、打戏；要决定静态漫还是动态漫、原生口播还是 TTS；要做换脸/人物替换；要跑 T8/U22/U24、Wan 首尾帧、LTX MSR 等高级工作流；要脱离插件直连 ComfyUI 提交任务、查状态、取成品；要排查画风漂移、口型错人、声线不分、台词被截、字幕自现、打斗发软、成片削波。
 metadata:
   version: 2
   requires: [ffmpeg, python3]
@@ -21,7 +21,7 @@ metadata:
 
 ## 0. 决策入口（先回答四个问题）
 
-**本 skill 服务三类平台爆款**：**AI 漫剧**（§3）、**AI 换脸/重演**（§2.5）、**外星人科普**（§4）。
+**本 skill 服务四类平台爆款**：**AI 漫剧**（§3）、**AI 短剧**（§3.5，红果/抖音）、**AI 换脸/重演**（§2.5）、**外星人科普**（§4）。
 同类变体（口播数字人、亲情向、动作迁移、MV、四宫格、动物拟人）见 `references/genres.md` 的类型地图——**换类型就要换节奏，不是换模型**。
 生态里还有 35 套工作流（生图/Wan/LTX/口播克隆）的编目与选型，见 `references/workflow-catalog.md`；权重怎么补见 `references/models.md`。
 
@@ -220,6 +220,28 @@ cfg=1，没有负面分支。`no subtitles / no text / not photorealistic` 会**
 
 ---
 
+## 3.5 短剧产线（红果 / 抖音）
+
+**和漫剧不是一回事**：漫剧靠画风与旁白，短剧靠**表演与对白**。
+
+| 项 | 红果口径 |
+|---|---|
+| 集数 | 80 集（60/100 亦可）；长档 30/40/50 |
+| 单集 | 90–120 秒；长档 150–195 秒 |
+| 四幕 | 20% / 35% / 25% / 20% |
+| 付费墙 | 10–15 / 28–32 / 55–58 集（抖音投流前置到 3–5 集） |
+
+**单集 15 秒换挡四拍**：抓人立事（0–15，报出死线/数字）→ 正面交锋（15–45，反派加码+主角反制）→ 亮牌翻转（45–85，本集结算、结果可视化）→ 余波钩子（85–110，停在未完动作）。
+**防原地打转**：每 15–30 秒，筹码/证据/站位必须变一次；不许换个地方吵同一件事。
+**断章**断在"反击前 0.5 秒"，不要断在爽完之后。
+**对白**：4.5 字/秒，连续 15 秒 ≤95 字，对白占比 60–75%。
+
+**合规（红果 2026-08 新规，硬门槛）**：跨剧**面部相似度 >65% 直接驳回**（换发型服饰但底层脸一致也算违规）→ 每剧必须自建角色资产；素材授权要闭环；每集片头标"AI 辅助制作"+元数据；未备案下架。
+
+详见 `references/short-drama.md`。
+
+---
+
 ## 4. 科普产线（外星人 + 地球人）
 
 **骨架**：钩子 → 赌约 → 第 N 天时间线 → 钻进比喻空间 → 求饶兑现 → 揭晓代价 → 下期赌约。
@@ -323,13 +345,13 @@ LoRA 用法与强度见 `references/lora-catalog.md`。
 
 ## 9. 资产索引
 
-**类型地图**：`references/genres.md`（漫剧/换脸/科普/口播/亲情向/动作迁移/MV/四宫格/动物拟人）
+**类型地图**：`references/genres.md`（漫剧/短剧/换脸/科普/口播/亲情向/动作迁移/MV/四宫格/动物拟人）
 
 **开头与钩子**：`references/hooks.md`（十种钩子句式、口播节奏、A/B 测试、失败清单）
 
 **语法与工艺**：`references/h3-prompt-spec.md` / `references/dialogue-blocking.md` / `references/camera-and-transitions.md` / `references/action-dynamics.md` / `references/longform-continuity.md`
 
-**三条产线**：`references/manju-playbook.md` / `references/science-playbook.md` / `references/face-swap.md` / `references/image-pipelines.md` / `references/templates.md`（可复制模板）
+**产线**：`references/manju-playbook.md`（漫剧）/ `references/short-drama.md`（红果短剧）/ `references/science-playbook.md`（科普）/ `references/face-swap.md`（换脸）/ `references/image-pipelines.md` / `references/templates.md`
 
 **功能**：`references/t8-pipelines.md` / `references/native-dialogue.md` / `references/talking-head.md` / `references/bgm.md` / `references/subtitles.md`
 

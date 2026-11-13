@@ -1,0 +1,16 @@
+{
+  "_comment": "路线E 第一步：用 Qwen-Image-Edit-2509 把「人像 + 原布景」合成为一张新首帧。用法：替换 10.image（目标人物肖像）、11.image（原片截帧/布景）、3.inputs.prompt（左右分别点名），提交后取 SaveImage 产物，再用 h3_i2v_api.json 把它当 first_frame 动画。模型需 qwen_image_edit_2509_fp8_e4m3fn + qwen_2.5_vl_7b_fp8_scaled + qwen_image_vae；Lightning LoRA 可选（4 步）。",
+  "prompt": {
+    "1": {"class_type": "UNETLoader", "inputs": {"unet_name": "qwen_image_edit_2509_fp8_e4m3fn.safetensors", "weight_dtype": "default"}},
+    "2": {"class_type": "LoraLoaderModelOnly", "inputs": {"model": ["1", 0], "lora_name": "Qwen-Image-Edit-2509-Lightning-4steps-V1.0-bf16.safetensors", "strength_model": 1.0}},
+    "3": {"class_type": "TextEncodeQwenImageEditPlus", "inputs": {"clip": ["4", 0], "vae": ["5", 0], "image1": ["10", 0], "image2": ["11", 0], "prompt": "Recreate the studio set from the second image exactly: <背景色、道具、光源、景别>. Replace the performer with the man from the first image, keeping his face highly recognizable and photorealistic. He wears <服装逐项> and stands facing the microphone mid-performance. Photorealistic 4K video still, no text, no captions, no logos."}},
+    "4": {"class_type": "CLIPLoader", "inputs": {"clip_name": "qwen_2.5_vl_7b_fp8_scaled.safetensors", "type": "qwen_image"}},
+    "5": {"class_type": "VAELoader", "inputs": {"vae_name": "qwen_image_vae.safetensors"}},
+    "6": {"class_type": "VAEEncode", "inputs": {"pixels": ["11", 0], "vae": ["5", 0]}},
+    "7": {"class_type": "KSampler", "inputs": {"model": ["2", 0], "seed": 42, "steps": 4, "cfg": 1.0, "sampler_name": "euler", "scheduler": "simple", "positive": ["3", 0], "negative": ["3", 0], "latent_image": ["6", 0], "denoise": 1.0}},
+    "8": {"class_type": "VAEDecode", "inputs": {"samples": ["7", 0], "vae": ["5", 0]}},
+    "9": {"class_type": "SaveImage", "inputs": {"images": ["8", 0], "filename_prefix": "swap/e1_firstframe"}},
+    "10": {"class_type": "LoadImage", "inputs": {"image": "example.png"}},
+    "11": {"class_type": "LoadImage", "inputs": {"image": "example.png"}}
+  }
+}

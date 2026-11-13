@@ -143,15 +143,22 @@ def plan(args):
             unresolved.append((base, item["dir"], note, sorted(item["used_by"])[:2]))
             continue
         ok += 1
-        lines += [
+        sha = (src.get("explicit", {}).get(base) or {}).get("sha256") or ""
+        block = [
             'DEST="$COMFY/%s"' % dest.replace('"', '\\"'),
             'if [ -f "$DEST" ]; then echo "skip  $DEST"; else',
             '  echo "get   $DEST"',
             '  mkdir -p "$(dirname "$DEST")"',
             '  curl -L --fail --retry 3 -C - --limit-rate "$RATE" -o "$DEST" %s || echo "FAIL $DEST"' % sh_quote(url),
             'fi',
-            "",
         ]
+        if sha:
+            block += [
+                'if [ -f "$DEST" ]; then echo "%s  $DEST" | sha256sum -c - >/dev/null 2>&1 '
+                '|| echo "HASH MISMATCH $DEST (再下一次或手工核对)"; fi' % sha,
+            ]
+        block.append("")
+        lines += block
     out = args.out or os.path.join(ROOT, "references", "workflows", "fetch-models.sh")
     with open(out, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(lines))

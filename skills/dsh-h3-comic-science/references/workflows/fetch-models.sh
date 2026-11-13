@@ -55,6 +55,7 @@ if [ -f "$DEST" ]; then echo "skip  $DEST"; else
   mkdir -p "$(dirname "$DEST")"
   curl -L --fail --retry 3 -C - --limit-rate "$RATE" -o "$DEST" 'https://huggingface.co/lightx2v/Qwen-Image-Lightning/resolve/main/Qwen-Image-Edit-2509/Qwen-Image-Edit-2509-Lightning-4steps-V1.0-bf16.safetensors?download=true' || echo "FAIL $DEST"
 fi
+if [ -f "$DEST" ]; then echo "2a32ce938ec71db2b49a817b4844ae86995569518dea56ee0ddc209cbe8e1377  $DEST" | sha256sum -c - >/dev/null 2>&1 || echo "HASH MISMATCH $DEST (再下一次或手工核对)"; fi
 
 DEST="$COMFY/models/text_encoders/clip_vision_h.safetensors"
 if [ -f "$DEST" ]; then echo "skip  $DEST"; else
@@ -181,6 +182,7 @@ if [ -f "$DEST" ]; then echo "skip  $DEST"; else
   mkdir -p "$(dirname "$DEST")"
   curl -L --fail --retry 3 -C - --limit-rate "$RATE" -o "$DEST" 'https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/resolve/main/split_files/diffusion_models/qwen_image_edit_2509_fp8_e4m3fn.safetensors?download=true' || echo "FAIL $DEST"
 fi
+if [ -f "$DEST" ]; then echo "318568f61951ab9da21100c7b896e3c1da67f0d2efad6421545e022cfaa2b2b4  $DEST" | sha256sum -c - >/dev/null 2>&1 || echo "HASH MISMATCH $DEST (再下一次或手工核对)"; fi
 
 DEST="$COMFY/models/diffusion_models/qwen/qwen_image_edit_2511_int8_convrot.safetensors"
 if [ -f "$DEST" ]; then echo "skip  $DEST"; else
