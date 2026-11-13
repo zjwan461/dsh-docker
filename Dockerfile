@@ -403,10 +403,16 @@ RUN set -eux; \
 # The smoke test is a real compile (a kernel to PTX), not just --version: nvcc
 # needs a working host compiler, the device headers and the CRT, and that one
 # command proves all three. PTX needs no GPU, so it is valid on any builder.
+#
+# PATH inside this RUN: the CUDA apt packages put nvcc only under
+# /usr/local/cuda/bin, and the ENV PATH line further below is not in effect yet.
+# The build therefore exports that directory itself; otherwise the smoke test
+# dies with `nvcc: not found` (exit 127) even though installation succeeded.
 ARG INSTALL_CUDA=0
 ARG CUDA_VERSION=13.0
 RUN set -eux; \
     if [ "${INSTALL_CUDA}" = "1" ]; then \
+      export PATH="/usr/local/cuda/bin:${PATH}"; \
       apt-get update; \
       apt-get install -y --no-install-recommends \
         build-essential \
