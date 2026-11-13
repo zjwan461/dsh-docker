@@ -198,10 +198,12 @@ H3 的训练分布偏实拍。二维漫剧只写一次 `anime style` 不够，**
 
 ### 3.5 声音方案（关键取舍）
 
+**情绪戏用 H3 原生口播，TTS 后期只用于旁白/数字/跨集一致性。** 实测 TTS 后期“跟不上剧情情绪节奏”；原生口播是音画同一次生成，情绪/口型/呼吸/停顿一体。口播情绪与节奏的完整方法见 `references/native-dialogue.md`。
+
 | 方案 | 适用 | 做法 |
 |---|---|---|
-| **TTS 为主（推荐）** | 对话多、角色多、要跨集同声音 | H3 只出环境声/动作声，提示词写 `overall_soundscape`，`<d>` 全部删掉；TTS 逐句生成，按实测时长排镜 |
-| H3 原生 | 短句、单人对白、想要"现场感" | 一镜一句、≤14 字、中景、说话人独占画面 |
+| **原生口播（情绪戏推荐）** | 情绪对白、吵架、哭戏、爆发 | 强表演短语放 `<d>` 外 + 短台词短窗 + 明确无声尾动作 |
+| TTS | 旁白、数字/术语、跨集音色一致且情绪平 | H3 只出环境声，`<d>` 删掉；TTS 逐句按实测排镜 |
 | 混合 | 打斗/反应用原生，叙述用 TTS | 原生镜头不要有长台词 |
 
 TTS 走 `dsh-video-narration`：逐句合成 → ffprobe 实测 → 按镜长 atempo（1.0–1.3）→ 逐镜响度对齐 → 混音 `normalize=0`。
@@ -243,7 +245,9 @@ non_diegetic_music: A single low taiko hit at a slow tempo, no melody.
 - **字数**：4s≈8–10 字、5s≈12–14、6s≈16–18、8s≈24–26、15s≈50–55（4.1 字/秒，扣 1.6 秒开口延迟）。超了就拆镜，不要加速。
 - **同性别多说话人必须拉开音色**：实测两个女声（`low, level` vs `calm, slow`）基频只差 ~47 Hz、听感分不开；男声靠音区天然分开。只写节奏词不够，要同时拉**音区+年龄+质感**（low/husky/middle-aged vs high/clear/young），否则改 TTS。见 `references/dialogue-blocking.md` §10。
 
-完整模板（15 秒双人三镜、三人议事、四人对峙、群戏画外音）见 `references/dialogue-blocking.md`。
+- **情绪戏用原生口播**：强表演短语放 `<d>` 外（要怒写 `unrestrained FURY`，不写克制/温柔）；短台词+短窗+明确无声尾动作防“尾部乱说”；情绪写成可观察节拍（baseline→trigger→cues→settle），不堆形容词。见 `references/native-dialogue.md`。
+
+完整模板（15 秒双人三镜、三人议事、四人对峙、群戏画外音）见 `references/dialogue-blocking.md`；口播情绪与节奏见 `references/native-dialogue.md`。
 
 ### 3.9 武打与高动态
 
@@ -602,6 +606,7 @@ python finish.py --out final.mp4 --clips clips/*.mp4 \
 | `references/subtitles.md` | 字幕路线决策：原生渲染 vs 后期烧录、H3 自动加字幕、文字可靠性边界 |
 | `references/bgm.md` | BGM：没有分轨、原生 vs 外挂、闪避与电平、跨切点连续性、实测记录 |
 | `references/face-swap.md` | 换脸/人物替换：四路线、body_swap 模板、原声复用、长片产线、限制、合规、插件边界 |
+| `references/native-dialogue.md` | 口播情绪与节奏：原生优于TTS、强表演短语、短窗+无声尾动作、微表情节拍、参考音频泄漏、人耳验收 |
 | `references/action-dynamics.md` | 武打与高动态：六拍、连续对轰、ULTRA_SPEED、招式配额、力场、冲击帧、震屏 |
 | `references/manju-playbook.md` | 漫剧：分镜表模板、镜头词表、静态漫做法、节奏与钩子、常见崩坏 |
 | `references/science-playbook.md` | 科普：完整骨架、空间词典、示例段落、出处表模板、双人调度 |
