@@ -53,6 +53,7 @@ metadata:
 B=http://<真实地址>:<端口>          # 必须按当前任务核对后传入
 S=references/workflows
 
+# comfy.py 会强制直连（忽略 HTTP(S)_PROXY），局域网 ComfyUI 不会被代理劫持
 python scripts/comfy.py --base $B queue                                     # 只读：忙不忙
 python scripts/comfy.py --base $B validate --workflow $S/h3/h3_t2v_api.json  # 只读：能不能跑
 python scripts/comfy.py --base $B upload --file ref.png --subfolder proj
@@ -355,5 +356,6 @@ LoRA 用法与强度见 `references/lora-catalog.md`。
 | 原生音轨偏爆 | V2 −10.2 LUFS / +1.2 dBTP |
 | 同性别音色分不开 | 女 212Hz vs 外星人 165Hz，人耳无差 |
 | 换脸 API 可行 | 原片→外星人，场景/动作保留 |
+| **图+音对口型可行** | U11：4s/480×864/0.4MP，身份稳定、嘴型随音频开合，~5 分钟 |
 
 完整数据与"未验证清单"见 `references/validation.md`。

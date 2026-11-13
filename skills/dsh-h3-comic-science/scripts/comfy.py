@@ -20,11 +20,19 @@ def base_url(a):
     b = a.base or os.environ.get("COMFYUI_BASE") or "http://127.0.0.1:8188"
     return b.rstrip("/")
 
+# 局域网/本机 ComfyUI 不能走代理：忽略 HTTP(S)_PROXY 环境变量
+_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
 def _req(base, method, path, data=None, headers=None, raw=False):
     url = base + path
     req = urllib.request.Request(url, data=data, method=method, headers=headers or {})
-    with urllib.request.urlopen(req, timeout=120) as r:
-        body = r.read()
+    try:
+        with _OPENER.open(req, timeout=120) as r:
+            body = r.read()
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", "replace")
+        raise RuntimeError("HTTP %s %s: %s" % (e.code, path, detail[:1500]))
     return body if raw else json.loads(body.decode("utf-8"))
 
 def get(base, path): return _req(base, "GET", path)
@@ -43,9 +51,15 @@ def upload(base, file, subfolder="", ftype="input"):
     return _req(base, "POST", "/upload/image", data=body,
                 headers={"Content-Type": "multipart/form-data; boundary=%s" % boundary})
 
+def clean(wf):
+    """去掉 _comment/_api_config 之类的元数据键，只留真正的节点。"""
+    return {k: v for k, v in wf.items()
+            if isinstance(v, dict) and "class_type" in v}
+
+
 def submit(base, wf_path):
     d = json.load(open(wf_path, encoding="utf-8"))
-    wf = d.get("prompt", d)
+    wf = clean(d.get("prompt", d))
     return _req(base, "POST", "/prompt", data=json.dumps({"prompt": wf, "client_id": uuid.uuid4().hex}).encode(),
                 headers={"Content-Type": "application/json"})
 
@@ -87,7 +101,7 @@ def download(base, pid, outdir):
 def validate(base, wf_path):
     """只读校验：节点类是否存在、必填输入是否齐全、引用的节点是否存在。不提交任务。"""
     d = json.load(open(wf_path, encoding="utf-8"))
-    wf = d.get("prompt", d)
+    wf = clean(d.get("prompt", d))
     info = get(base, "/object_info")
     errors = []
     ids = set(wf.keys())

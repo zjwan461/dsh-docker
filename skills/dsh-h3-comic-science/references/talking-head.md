@@ -36,6 +36,22 @@ VHS_LoadAudioUpload(音频) ─→ DenoAudioTranscript / TextGenerate（把音�
 
 适用：客户给了配音、歌曲、或你要用 TTS 生成好的音频。
 
+### 2.1 实测（2026-11-13，4s / 0.4MP / 480×864）
+
+**跑通了**：107 帧 / 4.458s / 带 48k 音轨，身份（寸头+黑框镜+灰卫衣）稳定，嘴型随音频开合，耗时约 **5 分钟**。
+
+接线要点（踩过的坑，照抄）：
+
+| 项 | 正确写法 | 错误写法 |
+|---|---|---|
+| 参考图 | 必须走 `ZealmanH3LoadImageToRefImages`（`232`），`141.ref_images = ["232", 0]` | `ref_images = [["233", 0]]` → 报 "must be length-2 list" |
+| 音频路径 | **带子目录**：`u11/u11_voice.wav` | 只写 `u11_voice.wav` → "Invalid file path" |
+| 转录链 | 可以**整条删掉**（181/182/183/184/186/187/226），`141.prompt` 直接给文字 | 保留会调用 whisper large-v3，慢且可能拉模型 |
+| 分辨率 | `WJILatentPreset` 自定义 480×864（32 倍数） | 用默认 768×1344 → 4 倍像素，慢 |
+| 音频时长 | `VHS_LoadAudioUpload.duration` 与 `length` 对齐（4s → 107f） | 音频比视频长 → 尾巴被截 |
+
+这条路线**不依赖 whisper、不依赖 T8 音频节点**，只要 `DenoMiniMaxH3ReferenceToVideo` + H3 三件套 + turbo LoRA 就能跑。
+
 ---
 
 ## 3. B：90 秒长口播（J13 InfiniteTalk）
