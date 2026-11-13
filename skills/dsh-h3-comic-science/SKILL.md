@@ -1,6 +1,6 @@
 ---
 name: dsh-h3-comic-science
-description: 用 MiniMax H3 做两类竖屏/横屏叙事片：**AI 漫剧**（2–5 分钟、漫画/动画质感、角色跨镜不变、配音+字幕）与 **AI 科普短剧**（外星人+地球人双人对话、每句台词配一个可进入的比喻场景、数字必须有出处）。含 H3 官方提示词骨架（三段式 `integrated_multimodal_description` / `overall_soundscape` / `non_diegetic_music`，六段式 r2v，`(S1)` 说话人，`<d>[Chinese] 台词</d>`，`[Shot 2] At 00:03.500` 切点）、**逐字台词四件套与多人站位（正反打/三人三角/四人分组/群戏分层/闭嘴锁）**、**运镜与转场（因果式运镜、动作接动作、30 度/声音桥、硬切/甩镜/穿入/尾帧接力）**、**长片连续性与剧集化（Hub/Chain 取舍、17k+5 帧规划、亮度漂移累积、剧集圣经、离线接缝检测）**、**交付质检（响度/真峰值/冻结/字幕安全区）**、**武打六拍与高动态（连续对轰、ULTRA_SPEED、招式配额、力场、冲击帧、震屏）**、**H3 没有负面词分支（cfg=1）——写 "no subtitles" 反而会把字幕招来**、**文生模式默认滑向真人实拍，二维漫剧必须每个镜头重申介质**、**中文对白约 4.1 字/秒且首帧模式会延迟 1.3–2.4 秒开口**、**同框两个正脸时口型会落到更显眼的那张脸上**、**本机 ComfyUI 默认模型名缺 `minimax/` 前缀会 400**、以及静态漫（关键帧+Ken Burns）比硬做动态漫更省更稳的取舍、**换脸/人物替换（Character Swap LoRA、body_swap 模板、原声复用、合规红线）**。要写漫剧/科普剧本、拆分镜、拼 H3 提示词、定镜长与配音方案、或做视频换脸/人物替换时加载。
+description: 用 MiniMax H3 做两类竖屏/横屏叙事片：**AI 漫剧**（2–5 分钟、漫画/动画质感、角色跨镜不变、配音+字幕）与 **AI 科普短剧**（外星人+地球人双人对话、每句台词配一个可进入的比喻场景、数字必须有出处）。含 H3 官方提示词骨架（三段式 `integrated_multimodal_description` / `overall_soundscape` / `non_diegetic_music`，六段式 r2v，`(S1)` 说话人，`<d>[Chinese] 台词</d>`，`[Shot 2] At 00:03.500` 切点）、**逐字台词四件套与多人站位（正反打/三人三角/四人分组/群戏分层/闭嘴锁）**、**运镜与转场（因果式运镜、动作接动作、30 度/声音桥、硬切/甩镜/穿入/尾帧接力）**、**长片连续性与剧集化（Hub/Chain 取舍、17k+5 帧规划、亮度漂移累积、剧集圣经、离线接缝检测）**、**交付质检（响度/真峰值/冻结/字幕安全区）**、**武打六拍与高动态（连续对轰、ULTRA_SPEED、招式配额、力场、冲击帧、震屏）**、**H3 没有负面词分支（cfg=1）——写 "no subtitles" 反而会把字幕招来**、**文生模式默认滑向真人实拍，二维漫剧必须每个镜头重申介质**、**中文对白约 4.1 字/秒且首帧模式会延迟 1.3–2.4 秒开口**、**同框两个正脸时口型会落到更显眼的那张脸上**、**本机 ComfyUI 默认模型名缺 `minimax/` 前缀会 400**、以及静态漫（关键帧+Ken Burns）比硬做动态漫更省更稳的取舍、**换脸/人物替换（Character Swap LoRA、body_swap 模板、原声复用、合规红线）**、**T8 高级管线（U22 9图3音、U24 文武双修）**，并自带 **`scripts/comfy.py`（纯标准库直连 ComfyUI，提交/查询/下载都不依赖插件工具）**。要写漫剧/科普剧本、拆分镜、拼 H3 提示词、定镜长与配音方案、做视频换脸、或脱离插件跑 ComfyUI 工作流时加载。
 whenToUse: 用户要做 AI 漫剧、动态漫、漫画短剧、竖屏故事片；要做"外星人给地球人讲知识"这类双人对话科普；要写多人同框的站位与台词；要设计运镜、切镜、转场（镜头切换突兀、像 PPT 翻页、接缝明显、不知道该怎么转场）；要写武打、追逐、变身、爆炸等高动态镜头；要把剧本拆成 H3 分镜与提示词；要决定用 H3 原生对白还是 TTS 配音；要排查 H3 生成的画风漂移、口型错人、台词被截断、字幕自己冒出来、打斗"软"或像摆拍；要做视频换脸/人物替换（演唱会换脸、世界巡演、Character Swap）；要在共用 ComfyUI 上批量出镜头时。
 metadata:
   version: 1
@@ -11,7 +11,27 @@ metadata:
 
 两条产线，一套底层。先把 H3 的"脾气"弄清楚，再谈剧本——**它不是一个听话的摄像机，是一个会自己补戏的联合导演**。
 
-配套：`dsh-minimax-h3-video`（工具与参数）、`dsh-video-still-first`（静帧一致性）、`dsh-video-narration`（TTS/混音）、`dsh-video-ffmpeg-post`（后期）、`dsh-video-structure`（片头片尾）。
+配套：`dsh-video-still-first`（静帧一致性）、`dsh-video-narration`（TTS/混音）、`dsh-video-ffmpeg-post`（后期）、`dsh-video-structure`（片头片尾）。
+
+## 0.0 不依赖插件：自带 ComfyUI 客户端
+
+**本 skill 可以完全脱离 `h3_generate` / `h3_runs` / `h3_post` 运行。** 提交任务、查状态、取成品都由 `scripts/comfy.py`（纯标准库）直连 ComfyUI HTTP API 完成：
+
+```bash
+B=http://<真实ComfyUI地址>:<端口>
+python comfy.py --base $B queue                     # 看忙不忙（只读）
+python comfy.py --base $B info --filter MiniMaxH3   # 查节点
+python comfy.py --base $B upload --file ref.png --subfolder myproj
+python comfy.py --base $B submit --workflow wf.json # 打印 prompt_id
+python comfy.py --base $B wait --id <PID> --timeout 900
+python comfy.py --base $B download --id <PID> --out out/
+```
+
+- `--base`（或环境变量 `COMFYUI_BASE`）**必须由调用方按当前任务核对后传入真实地址**；脚本不内置、不替换任何代理。
+- **官方三套已剥离成 API 格式**，随 skill 提供、离线校验通过：`references/workflows/h3_t2v_api.json` / `h3_i2v_api.json` / `h3_r2v_api.json`（节点图同官方模板的 ImageToVideo / ReferenceToVideo + SamplerCustomAdvanced）。
+- 提交前可只读校验：`comfy.py --base $B validate --workflow <json>`（查节点类/必填项/引用，不占 GPU）。
+- 后期同样不依赖插件：`finish.py`（合片/响度/字幕/BGM）、`qa.py`（质检）、`seam.py`（接缝）。
+- `h3_*` 工具仍在时可直接用，但它只是"顺手的封装"，**不是前提**。
 
 ---
 
@@ -22,7 +42,7 @@ metadata:
 | 时长 | 60s–5min，一集一个钩子 | 2–5min，一集一个赌约 |
 | 画风 | 2D 漫画/赛璐璐/国风条漫，**非实拍** | 写实电影感，外星人"实拍化" |
 | 核心难点 | 角色跨镜不变 + 节奏 | 知识点可视化 + 数字准确 |
-| 推荐声音 | **TTS 配音为主**，H3 只出环境声/音效 | 短句可 H3 原生；数字多、术语多则 TTS |
+| 推荐声音 | 情绪对白走**原生口播**；旁白/数字走 TTS | 短句原生；数字多、术语多则 TTS |
 | 镜头量 | 25–60 镜（2–5s/镜） | 30–50 镜（3–6s/镜） |
 | 一致性工具 | 三视图 + r2v | 双人设定图 + 场景图 + r2v |
 
@@ -368,6 +388,15 @@ H3 一次只有 4–15 秒，长片就是**一串接缝**。三条实测结论�
 
 完整模板（`body_swap` 全文、`{details}` 填法、产线、限制、合规、选型）见 `references/face-swap.md`。
 
+### 3.13 T8 高级管线（U22 9图3音 / U24 文武双修）
+
+两个现成 API 工作流（存于 `references/workflows/`），对漫剧帮助大，**只能画布或 `/prompt` 跑**（`h3_generate` 缺 T8/guide/audio 节点）：
+
+- **U22 9图3音**：native r2v 满参考（9 图+3 音）。9 图=每角色脸+全身+场景，3 音=每说话人音色 → 治跨镜变脸/变声、同性别声线不分。
+- **U24 文武双修**：混合底模 `hybrid_fl2va_ref2va`（首尾帧连续+参考身份一体）＋LoRA 栈（真实电影质感=文、H3_Combat_V2=武、Motion_Repair=稳动作、turbo 提速，分遍强度）＋两遍采样（DualClock 一采→learned upscale+detail mixer 二采）→ 对白+打戏同管线高质量。
+
+边界：不保证声纹/逐字/无缝，双采有轻微接缝变色；服务器忙时不提交验证。详见 `references/t8-pipelines.md`。
+
 ---
 
 ## 4. 科普产线（外星人 + 地球人）
@@ -568,7 +597,9 @@ python finish.py --out final.mp4 --clips clips/*.mp4 \
 | 生成排队很久 | 共用服务器 | 先 `queue` 看，再逐条提交 |
 | `invalid output: value is not lossless JSON` | 同步模式偶发 | 改用 `mode_run: "async"` + `job_output` |
 | `h3_post` 所有操作失败，`FFmpeg exited with code 4294967283`（= −13） | ffmpeg 往 `%TEMP%` 写文件被拒（本机 `D:\temp` 不可写，但 workspace 可写） | 改用 `scripts/finish.py`；或把 `TEMP`/`TMP` 指到可写目录并重启 DSH |
-| `h3_generate` 报 `invalid output: value is not lossless JSON` 或 `session ... has no live agent` | 工具返回层坏了，但**任务往往已经提交** | **先 `h3_runs action: "list"` 看有没有新 run**；有就取结果并取消重复任务，不要连续重试（本机实测重试会建出重复任务，白占队列） |
+| `h3_generate` 报 `invalid output: value is not lossless JSON` 或 `session ... has no live agent` | 工具返回层坏了，但**任务往往已经提交** | **先查 run 列表**（`h3_runs list` 或 `comfy.py queue`）确认是否已建任务，有就取结果、取消重复，不要连续重试 |
+| 想完全绕开插件 | 插件默认名/返回层/临时目录都可能有坑 | 用 `scripts/comfy.py` 直连：`submit --workflow wf.json` + `wait` + `download`；workflow 里把模型路径写全（`minimax/...`） |
+| 插件报的模型名 400 | 默认名缺 `minimax/` 前缀 | 直连时在 workflow JSON 里写全路径即可，不存在该问题 |
 
 ---
 
@@ -607,12 +638,15 @@ python finish.py --out final.mp4 --clips clips/*.mp4 \
 | `references/bgm.md` | BGM：没有分轨、原生 vs 外挂、闪避与电平、跨切点连续性、实测记录 |
 | `references/face-swap.md` | 换脸/人物替换：四路线、body_swap 模板、原声复用、长片产线、限制、合规、插件边界 |
 | `references/native-dialogue.md` | 口播情绪与节奏：原生优于TTS、强表演短语、短窗+无声尾动作、微表情节拍、参考音频泄漏、人耳验收 |
+| `references/t8-pipelines.md` | T8 高级管线：U22 9图3音(多角色+多音色)、U24 文武双修(混合底模+LoRA栈+两遍)、映射与边界 |
+| `references/workflows/` | **官方三套 API 格式**（h3_t2v_api / h3_i2v_api / h3_r2v_api，已校验）＋ character-swap-api ＋ U22/U24，见该目录 README |
 | `references/action-dynamics.md` | 武打与高动态：六拍、连续对轰、ULTRA_SPEED、招式配额、力场、冲击帧、震屏 |
 | `references/manju-playbook.md` | 漫剧：分镜表模板、镜头词表、静态漫做法、节奏与钩子、常见崩坏 |
 | `references/science-playbook.md` | 科普：完整骨架、空间词典、示例段落、出处表模板、双人调度 |
 | `references/templates.md` | 可直接复制的提示词模板（漫剧 i2v/r2v、科普 r2v、穿越转场、空镜、字卡） |
 | `scripts/scaffold.py` | 建项目目录 + `分镜.json` + 提示词骨架 |
 | `scripts/check.py` | 生成前校验：时长/台词容量/说话人/r2v 挂图/字段完整性 |
+| `scripts/comfy.py` | **不依赖插件的 ComfyUI 客户端**：info/upload/submit/queue/status/wait/download/view |
 | `scripts/qa.py` | 交付前质检：分辨率/帧率/响度/真峰值/冻结/黑场/场景切换数 |
 | `scripts/seam.py` | 离线接缝检测：PSNR 判续接/硬切、复读检测、亮度跳变 |
 | `scripts/finish.py` | 命令行成片装配：统一画幅→合片→响度→自动字幕→封面（`h3_post` 的替代） |

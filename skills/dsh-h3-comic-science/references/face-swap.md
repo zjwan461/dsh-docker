@@ -121,7 +121,8 @@ Using the movement of the figure in <Video 1> only, the [new person] from <Pictu
 
 - 当前 r2v **只接参考图，不接 guide video / `MiniMaxH3AddGuide`** → **不能直接对已有视频换脸**。
 - 要做路线 B/C/D：用 **ComfyUI 画布**（AddGuide + Character Swap LoRA）或**官方 API**；或扩展插件接 `ref_video`/guide。
-- 服务器需含 `MiniMaxH3AddGuide` 节点；当前 diagnose 未列出 → 需安装/确认自定义节点包。
+- **不依赖插件的跑法**：`python scripts/comfy.py --base <真实地址> submit --workflow references/character-swap-api.json` → `wait --id <PID>` → `download`，即用 API 直接跑真换脸（本文 §11 已验证）。
+- 服务器需含 `MiniMaxH3AddGuide` 节点（本机已确认存在）。
 - **像素级精确换脸 / 长片 / 实时** → 用专用 face-swap 工具（FaceFusion / DeepFaceLab / InsightFace 系），与 H3“重渲染”路线不同：前者贴脸保原片像素，后者重画整帧。
 
 ---
