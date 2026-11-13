@@ -108,7 +108,7 @@
 | 冲击 | 定格 0.3s + 闪白 + 音效 |
 | 时间流逝 | 同构图叠化，两张色板 |
 
-工具：`h3_post op: "scale"` / `"ratio"` 做画布，或剪辑软件里做 Ken Burns。生成侧不需要 H3。
+工具：`scripts/finish.py --aspect` 做画布，或 `ffmpeg zoompan`、剪辑软件里做 Ken Burns。生成侧不需要 H3。
 
 ### 4.3 什么时候必须动态
 

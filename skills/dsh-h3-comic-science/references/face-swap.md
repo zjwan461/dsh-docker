@@ -15,16 +15,29 @@
 
 ---
 
-## 1. 四条路线
+## 1. 五条路线
 
-| 路线 | 机制 | likeness | 口型 | 额外权重 | 适合 |
+| 路线 | 机制 | likeness | 动作复刻 | 额外权重 | 适合 |
 |---|---|---|---|---|---|
-| **A 原生 r2v 运动迁移** | `ref_video`(运动) + `ref_image`(身份)，`attribute_transfer` | 中 | 不保 | 无 | 快速试、无 LoRA |
-| **B Character Swap LoRA** | guide-latent 条件 + 参考图，`body_swap` 模板 | **高** | 不保 | 80MB LoRA | **默认推荐** |
-| **C Head Swap LoRA** | 只换头、保口型 | 高(头) | **保** | LoRA | 要对口型 |
-| **D 选择性换脸** | normal map / DWPose 标记只换某主体 | 高 | 不保 | LoRA+preprocessor | 多人只换其一 |
+| **A 原生 r2v 运动迁移** | `ref_video`(运动) + `ref_image`(身份)，`attribute_transfer` | 中 | 中 | 无 | 快速试、无 LoRA |
+| **B Character Swap LoRA** | guide-latent 条件 + 参考图，`body_swap` 模板 | **高** | **高** | 80MB LoRA | 要严格跟原片 |
+| **C Head Swap LoRA** | 只换头、保口型 | 高(头) | 高 | LoRA | 要对口型 |
+| **D 选择性换脸** | normal map / DWPose 标记只换某主体 | 高 | 高 | LoRA+preprocessor | 多人只换其一 |
+| **E 首帧重建法** | 图像编辑做"新人+原布景"首帧 → 图生视频演一遍 | 高 | **低（重演）** | 无 | 托管 API / 没有 guide 能力时 |
 
-B/C 可组合（实验性，口型可能更好，不保证）。
+B/C 可组合（实验性，口型可能更好，不保证）。**E 是平台爆款（rapper swap / 世界巡演）的主流做法**，见 §12。
+
+---
+
+## 1.5 路线怎么选
+
+```
+有原片、要严格复刻动作？
+├─ 有 → 自建 ComfyUI：B（+C 保口型）
+└─ 没有 / 只有托管 API → E（首帧重建 + 表演提示词）
+只要某一主体换 → D
+只要头、要口型 → C
+```
 
 ---
 
@@ -140,7 +153,7 @@ Using the movement of the figure in <Video 1> only, the [new person] from <Pictu
 
 ---
 
-## 10. 本机实测（2026-11-13）
+## 10. 实测（2026-11-13）
 
 - 三个 LoRA（`character_swap_v1.1` / `head_swap_v1.0` / `preprocessor_map`）下载后**无需重启即被 ComfyUI 识别**（`LoraLoaderModelOnly` 列表可见，共 23 个）。inventory 的 alternatives 只是截断子集，别据此判断“没装上”。
 - **3s / 0.4MP / r2v / `character_swap_v1.1`（strength 1.0，turbo=false 20 步）** sanity 测试：参考图身份（寸头/黑方框镜/灰卫衣）四帧稳定、无漂移/闪烁 → **LoRA 加载与身份生成正常**。
@@ -168,3 +181,57 @@ Using the movement of the figure in <Video 1> only, the [new person] from <Pictu
 **验证结果（2026-11-13）**：原片男人 → 外星人，场景/机位/呼吸动作保留，身份稳定。证明 API 路线可行。
 
 **合规**：演示用虚构/已授权角色；真人换脸需授权并标 AI。
+
+---
+
+## 12. 路线 E：首帧重建法（平台爆款的主流做法）
+
+**思路**：不碰原片视频，只借它的**布景**。用图像编辑生成一张"新人站在原布景"的静帧，再图生视频让模型**重演**一遍。
+
+### 12.1 三步
+
+1. **取布景**：从原片截一帧（选构图最完整、人物最少的）。
+2. **重建首帧**：图像编辑，输入 = 人像 A + 人像 B + 布景帧；提示词逐条点名。
+3. **动画**：首帧 → 图生视频（H3 `i2v` / U02），提示词写表演。
+
+### 12.2 首帧提示词的写法（照这个结构）
+
+```text
+Recreate the studio set from the third image exactly: <布景：背景色、道具、光源、景别>.
+Replace the two performers with the two men from the first and second images, keeping their faces
+highly recognizable and photorealistic.
+On the left, the man from the first image: <服装逐项>.
+On the right, the man from the second image: <服装逐项>.
+They stand side by side facing the microphone mid-performance. Photorealistic 4K video still,
+no text, no captions, no logos.
+```
+
+要点：**左右分别点名 + 服装逐项 + 布景照抄**。图像编辑模型有负面词分支，所以 `no text` 在这里是有效的（和 H3 相反）。
+
+### 12.3 动画提示词的四条习惯
+
+| 习惯 | 写法 | 为什么 |
+|---|---|---|
+| 点名谁先动 | `the man on the left in the black turtleneck raps first` | 不点名，两人会合体/换衣服 |
+| 要声音就明写 | `audible rap vocals and a punchy beat` | H3 总会出声，不指定就随机 |
+| 禁字幕 | `no subtitles, no captions, no on-screen text` | 这类画面最容易长歌词条（可试，但别指望） |
+| 机位别浪 | `steady camera with a slow push-in` | 大运镜是身份漂移主因 |
+
+### 12.4 画幅陷阱
+
+图生视频**跟随首帧比例**。图像编辑常出 3:2，直接动画会得到信箱边——**先把静帧裁成目标画幅**（如 16:9 的 1536×864）再提交。
+
+### 12.5 与路线 B 的区别
+
+| | E 首帧重建 | B Character Swap |
+|---|---|---|
+| 动作 | 模型现编（重演） | 严格跟原片 |
+| 依赖 | 只要图生视频 | 要 guide + LoRA + 自建 |
+| 适用 | 舞台/演唱会/固定布景 | 影视片段/精确复刻 |
+
+### 12.6 平台政策（重要）
+
+- **H3 接受真人肖像当首帧**（托管 API 实测可通过），但**不代表可以随便用**——肖像权仍需授权。
+- **Seedance 2.x 明确拒绝含真人的参考图/参考视频**（`may contain real person`），所以"真人换脸"在那边走不通。
+- **首帧与参考图不能混用**：一次请求只能是 `image`（或+`last_frame`），不能同时带 `reference_images`。
+- 每次提交都是新渲染，重提会重复计费。

@@ -41,12 +41,12 @@
 
 ## 4. 集成注意 / 边界
 
-- **只能画布或 `/prompt`**，`h3_generate` 不支持 T8/guide/audio。用 `python scripts/comfy.py --base <真实地址> submit --workflow references/workflows/U22-9图3音.json` 即可脱离插件提交（先 `upload` 参考图/音，再 `wait`/`download`）。
+- **只能画布或 `/prompt`**，`h3_generate` 不支持 T8/guide/audio。用 `python scripts/comfy.py --base <真实地址> submit --workflow references/workflows/h3/U22-9图3音.json` 即可脱离插件提交（先 `upload` 参考图/音，再 `wait`/`download`）。
 - T8 README 明确：**不保证**精确声纹、逐字时序、无接缝；**双采有轻微接缝变色**；EXP 工作流不通用，换素材/显卡/长窗需重验。
 - 混合底模与 LoRA 需版本配对，别把同名不同版权重互覆盖。
 - 服务器忙时**不要提交验证**；先存工作流与配方，闲时再跑。
 
 ## 5. 资产
 
-- [`workflows/U22-9图3音.json`](workflows/U22-9图3音.json)
-- [`workflows/U24-文武双修T8版.json`](workflows/U24-文武双修T8版.json)
+- [`workflows/h3/U22-9图3音.json`](workflows/h3/U22-9图3音.json)
+- [`workflows/h3/U24-文武双修T8版.json`](workflows/h3/U24-文武双修T8版.json)

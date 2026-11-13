@@ -1,0 +1,187 @@
+{
+  "_comment": "模型来源映射。explicit 是已核实的 仓库+路径；candidates 是按文件名自动匹配的仓库列表（按顺序尝试）。hints 给未收录文件的人话提示。补新模型只要往这三处加。",
+  "explicit": {
+    "minimax_h3_fl2va_pruned_int8_convrot.safetensors": {
+      "repo": "Comfy-Org/MiniMax-H3",
+      "path": "diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors"
+    },
+    "minimax_h3_ref2va_pruned_int8_convrot.safetensors": {
+      "repo": "Comfy-Org/MiniMax-H3",
+      "path": "diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors"
+    },
+    "minimax_h3_ref2va_int8_convrot.safetensors": {
+      "repo": "Comfy-Org/MiniMax-H3",
+      "path": "diffusion_models/minimax_h3_ref2va_int8_convrot.safetensors"
+    },
+    "minimax_h3_fl2va_pruned_fp8_scaled.safetensors": {
+      "repo": "Comfy-Org/MiniMax-H3",
+      "path": "diffusion_models/minimax_h3_fl2va_pruned_fp8_scaled.safetensors"
+    },
+    "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors": {
+      "repo": "Comfy-Org/MiniMax-H3",
+      "path": "text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"
+    },
+    "qwen3vl_32b_minimax_h3_int8_convrot.safetensors": {
+      "repo": "Comfy-Org/MiniMax-H3",
+      "path": "text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors"
+    },
+    "minimax_h3_video_vae_fp16.safetensors": {
+      "repo": "Comfy-Org/MiniMax-H3",
+      "path": "vae/minimax_h3_video_vae_fp16.safetensors"
+    },
+    "minimax_h3_video_vae_int8_convrot.safetensors": {
+      "repo": "Comfy-Org/MiniMax-H3",
+      "path": "vae/minimax_h3_video_vae_int8_convrot.safetensors"
+    },
+    "minimax_h3_audio_vae_fp32.safetensors": {
+      "repo": "Comfy-Org/MiniMax-H3",
+      "path": "vae/minimax_h3_audio_vae_fp32.safetensors"
+    },
+    "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors": {
+      "repo": "lightx2v/Minimax-h3-Turbo",
+      "path": "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors"
+    },
+    "minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors": {
+      "repo": "Comfy-Org/MiniMax-H3",
+      "path": "loras/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors"
+    },
+    "minimax_h3_character_swap_v1.1_ref2va_fro.safetensors": {
+      "repo": "Alissonerdx/Minimax-H3-ComfyUI",
+      "path": "loras/minimax_h3_character_swap_v1.1_ref2va_fro.safetensors"
+    },
+    "minimax_h3_head_swap_v1.0_r32.safetensors": {
+      "repo": "Alissonerdx/Minimax-H3-ComfyUI",
+      "path": "loras/minimax_h3_head_swap_v1.0_r32.safetensors"
+    },
+    "minimax_h3_character_swap_v1.0_preprocessor_map_fro099.safetensors": {
+      "repo": "Alissonerdx/Minimax-H3-ComfyUI",
+      "path": "loras/minimax_h3_character_swap_v1.0_preprocessor_map_fro099.safetensors"
+    },
+    "minimax_h3_lms_v1.0_r64.safetensors": {
+      "repo": "Alissonerdx/Minimax-H3-ComfyUI",
+      "path": "loras/minimax_h3_lms_v1.0_r64.safetensors"
+    },
+    "qwen_image_2512_fp8_e4m3fn.safetensors": {
+      "repo": "Comfy-Org/Qwen-Image_ComfyUI",
+      "path": "split_files/diffusion_models/qwen_image_2512_fp8_e4m3fn.safetensors"
+    },
+    "qwen_image_edit_2509_fp8_e4m3fn.safetensors": {
+      "repo": "Comfy-Org/Qwen-Image-Edit_ComfyUI",
+      "path": "split_files/diffusion_models/qwen_image_edit_2509_fp8_e4m3fn.safetensors"
+    },
+    "qwen_image_edit_2511_int8_convrot.safetensors": {
+      "repo": "Comfy-Org/Qwen-Image-Edit_ComfyUI",
+      "path": "split_files/diffusion_models/qwen_image_edit_2511_int8_convrot.safetensors"
+    },
+    "z_image_turbo_bf16.safetensors": {
+      "repo": "Comfy-Org/z_image_turbo",
+      "path": "split_files/diffusion_models/z_image_turbo_bf16.safetensors"
+    },
+    "Minimax-h3_Singularity_ref2va_Pruned_v1.3_int8.safetensors": {
+      "repo": "WarmBloodAban/Minimax-h3_Singularity",
+      "path": "Minimax-h3_Singularity_ref2va_Pruned_v1.3_int8.safetensors"
+    },
+    "Minimax-h3_Singularity_ref2va_v1.3_int8.safetensors": {
+      "repo": "WarmBloodAban/Minimax-h3_Singularity",
+      "path": "Minimax-h3_Singularity_ref2va_v1.3_int8.safetensors"
+    },
+    "LTX23_video_vae_bf16.safetensors": {
+      "repo": "Kijai/LTX2.3_comfy",
+      "path": "vae/LTX23_video_vae_bf16.safetensors"
+    },
+    "LTX23_audio_vae_bf16.safetensors": {
+      "repo": "Kijai/LTX2.3_comfy",
+      "path": "vae/LTX23_audio_vae_bf16.safetensors"
+    },
+    "ltx-2.3_text_projection_bf16.safetensors": {
+      "repo": "Kijai/LTX2.3_comfy",
+      "path": "text_encoders/ltx-2.3_text_projection_bf16.safetensors"
+    },
+    "gemma4_e4b_it_fp8_scaled.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/gemma-4/resolve/main/text_encoders/gemma4_e4b_it_fp8_scaled.safetensors",
+      "_dir": "text_encoders"
+    },
+    "minimax_h3_hybrid_fl2va_ref2va_b25-49-int8.safetensors": {
+      "url": "https://huggingface.co/smhfacct/Minimax-H3-fl2va-ref2va-hybrid-models/resolve/main/minimax_h3_hybrid_fl2va_ref2va_b25-49-int8.safetensors",
+      "_dir": "diffusion_models"
+    },
+    "qwen_2.5_vl_7b_fp8_scaled.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/HunyuanVideo_1.5_repackaged/resolve/main/split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors",
+      "_dir": "text_encoders"
+    },
+    "qwen_image_vae.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/vae/qwen_image_vae.safetensors",
+      "_dir": "vae"
+    },
+    "wan_2.1_vae.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors",
+      "_dir": "vae"
+    },
+    "umt5_xxl_fp8_e4m3fn_scaled.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+      "_dir": "text_encoders"
+    },
+    "clip_vision_h.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Wan-Animate-2/resolve/main/clip_vision/clip_vision_h.safetensors",
+      "_dir": "clip_vision"
+    },
+    "minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16.safetensors": {
+      "repo": "lightx2v/Minimax-h3-Turbo",
+      "path": "minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16.safetensors"
+    },
+    "minimax_h3_fl2v_turbo_4step_v1.1_768p_comfyui_bf16.safetensors": {
+      "repo": "lightx2v/Minimax-h3-Turbo",
+      "path": "minimax_h3_fl2v_turbo_4step_v1.1_768p_comfyui_bf16.safetensors"
+    },
+    "minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16.safetensors": {
+      "repo": "lightx2v/Minimax-h3-Turbo",
+      "path": "minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16.safetensors"
+    },
+    "Qwen-Image-Edit-2509-Lightning-4steps-V1.0-bf16.safetensors": {
+      "repo": "lightx2v/Qwen-Image-Lightning",
+      "path": "Qwen-Image-Edit-2509/Qwen-Image-Edit-2509-Lightning-4steps-V1.0-bf16.safetensors"
+    },
+    "z_image_turbo_int8_convrot.safetensors": {
+      "repo": "Comfy-Org/z_image_turbo",
+      "path": "split_files/diffusion_models/z_image_turbo_int8_convrot.safetensors"
+    }
+  },
+  "candidates": [
+    "Comfy-Org/MiniMax-H3",
+    "Alissonerdx/Minimax-H3-ComfyUI",
+    "Comfy-Org/MiniMax-H3-Image",
+    "Comfy-Org/Qwen-Image-2.1",
+    "Comfy-Org/Qwen-Image_ComfyUI",
+    "Comfy-Org/Qwen-Image-Edit_ComfyUI",
+    "lightx2v/Qwen-Image-Lightning",
+    "Comfy-Org/Wan_2.2_ComfyUI_Repackaged",
+    "Comfy-Org/Wan_2.1_ComfyUI_repackaged",
+    "Kijai/WanVideo_comfy",
+    "lightx2v/Wan2.1-I2V-14B-720P-Lightx2v",
+    "Lightricks/LTX-2.3",
+    "Kijai/LTX2.3_comfy",
+    "Comfy-Org/LTX-2.3",
+    "LiconStudio/LTX-2.3-Multiple-Subject-Reference",
+    "Tongyi-MAI/Z-Image-Turbo",
+    "Comfy-Org/z_image_turbo",
+    "Comfy-Org/flux2-klein",
+    "black-forest-labs/FLUX.2-klein"
+  ],
+  "hints": {
+    "minimax_h3_hybrid_fl2va_ref2va_b25-49-int8.safetensors": "社区混合底模：搜 HF 'minimax_h3_hybrid'，或从 T8 网盘取",
+    "H3_Combat_V2.safetensors": "社区风格 LoRA：搜 HF/Civitai 'H3 Combat'",
+    "Motion_Repair.safetensors": "社区 LoRA：搜 HF 'Motion_Repair minimax'",
+    "MinimaxH3真实电影质感V0.1.safetensors": "中文社区 LoRA：搜 HF/哩布 '真实电影质感 MiniMax H3'",
+    "MysticXXX_MMH3-V1.safetensors": "社区风格 LoRA：搜 HF 'MysticXXX MMH3'",
+    "minimax_h3_turbo_v4_step600_ema_pruned_comfyui.safetensors": "社区加速：搜 HF 'minimax_h3_turbo_v4'",
+    "minimax_h3_dmad_full_dareties_v4_step600_comfy_fro.safetensors": "社区风格 LoRA：搜 HF 'dmad dareties'",
+    "AnythingtoRealCharacters2511_20.safetensors": "Qwen 洗图 LoRA：搜 HF 'AnythingtoRealCharacters 2511'",
+    "Z-Image-Fun-Lora-Distill-8-Steps-2603-ComfyUI.safetensors": "Z-Image 蒸馏 LoRA：搜 HF 'Z-Image Fun Lora'",
+    "Z-Image-Base-8steps-White_Marble-AIO_v2-bf16.safetensors": "社区整合底模：搜 HF 'White Marble Z-Image'",
+    "Kook_Qwen_V3极致真实.safetensors": "中文社区 LoRA：哩布/Civitai 搜 'Kook Qwen'",
+    "Kook_Qwen_真实幻想V2.safetensors": "中文社区 LoRA：哩布/Civitai 搜 'Kook Qwen'",
+    "qwen-image-edit-multiple-angles-Q6_K.gguf": "GGUF 多角度版：ChrisColeTech/qwen-image-edit-multiple-angles-GGUF",
+    "fish_s2_pro.safetensors": "FishAudio 声音克隆权重：见 t8star / FishAudio 官方仓库",
+    "LTX-2.3-Licon-MSR-V2.safetensors": "LiconStudio/LTX-2.3-Multiple-Subject-Reference"
+  }
+}
