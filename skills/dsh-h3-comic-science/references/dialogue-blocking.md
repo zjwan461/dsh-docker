@@ -208,9 +208,41 @@ The two children (S1,S2) shout together: <d>[Chinese] 等一下！</d>
 
 ---
 
-## 10. 交付前自检
+## 10. 同性别多说话人：音色必须拉开（实测）
+
+**人耳 + 基频实测（2026-11-13，V2 三人对话）**：
+
+| 说话人 | 提示词音色 | 实测中位 F0 | 听感 |
+|---|---|---|---|
+| 女（前景） | `low, level female voice` | ≈212 Hz | 与外星人**分不开** |
+| 外星人 | `calm, slow adult female voice` | ≈165 Hz | 与女**分不开** |
+| 男 | `fast young male voice` | ≈122 Hz | **清楚区分** |
+
+两个女声只差 ~47 Hz、区间大量重叠 → 听感几乎相同；男声靠性别/音区天然分开。
+**只写 `calm / slow / level` 这类节奏词，分不开同性别说话人。**
+
+### 10.1 改法：把音色拉到不同音区 + 年龄 + 质感
+
+```text
+女（中年、权威）: a middle-aged woman with a low, husky, clipped voice
+外星人（年轻、非人）: a young synthetic female voice, high and clear, slow, with a faint metallic ring
+男: a fast young male voice
+```
+
+三个维度同时拉开：**音区**（low vs high）、**年龄**（middle-aged vs young）、**质感**（husky vs clear/metallic）。
+只拉一个维度（比如都写 female 只改快慢）不够。
+
+### 10.2 兜底
+
+- 同性别分离天生比跨性别弱；**要保证两个女声绝对不同，用每说话人参考音频**（`<Audio N>`，本插件不支持）或 **TTS 后期配音**。
+- 多女角阵容若必须原生对白，先跑一条 3 秒样片量 F0 / 人耳听，分不开就改描述或转 TTS。
+
+---
+
+## 11. 交付前自检
 
 - [ ] 每个说话人都有 `(S1)/(S2)`，且全片编号一致
+- [ ] **同性别多说话人：音色描述拉开音区+年龄+质感，或改 TTS**（见 §10）
 - [ ] 每句台词都有身份、动作、`<d>` 三件套
 - [ ] 同框对白写了"只有 X 动嘴"
 - [ ] 每个镜头都能回答：谁在左、谁在右、看哪、距离多远
