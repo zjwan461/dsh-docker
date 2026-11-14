@@ -37,7 +37,7 @@
   },
   "78": {
     "inputs": {
-      "image": "770b3ecc9510b0f8cae0210cd34e3077.jpg"
+      "image": "a08_input.png"
     },
     "class_type": "LoadImage",
     "_meta": {
@@ -71,8 +71,8 @@
         0
       ],
       "vae": [
-        "510",
-        1
+        "39",
+        0
       ],
       "image1": [
         "243",
@@ -108,16 +108,16 @@
       "scheduler": "simple",
       "denoise": 0.8000000000000002,
       "model": [
-        "444",
+        "439",
         0
       ],
       "positive": [
-        "536",
+        "539",
         0
       ],
       "negative": [
-        "536",
-        1
+        "540",
+        0
       ],
       "latent_image": [
         "88",
@@ -161,20 +161,6 @@
       "strength_model": 0.30000000000000004,
       "model": [
         "431",
-        0
-      ]
-    },
-    "class_type": "LoraLoaderModelOnly",
-    "_meta": {
-      "title": "LoRA加载器（仅模型）"
-    }
-  },
-  "444": {
-    "inputs": {
-      "lora_name": "Qwen/Qwen动漫转写实真人V2_V2.safetensors",
-      "strength_model": 0.30000000000000004,
-      "model": [
-        "439",
         0
       ]
     },
@@ -234,7 +220,7 @@
   },
   "474": {
     "inputs": {
-      "model": "seedvr2_ema_3b-Q4_K_M.gguf",
+      "model": "seedvr2_ema_3b_fp16.safetensors",
       "device": "cuda:0",
       "blocks_to_swap": 32,
       "swap_io_components": true,
@@ -354,7 +340,7 @@
       "steps": 5,
       "cfg": 1,
       "sampler_name": "dpmpp_2m_sde",
-      "scheduler": "FlowMatchEulerDiscreteScheduler",
+      "scheduler": "simple",
       "denoise": 0.010000000000000002,
       "model": [
         "480",
@@ -410,7 +396,7 @@
   },
   "489": {
     "inputs": {
-      "clip_name": "qwen_3_4b_int8_convrot.safetensors",
+      "clip_name": "qwen_3_4b.safetensors",
       "type": "qwen_image",
       "device": "default"
     },
@@ -421,10 +407,7 @@
   },
   "492": {
     "inputs": {
-      "text": [
-        "562",
-        0
-      ],
+      "text": "transform the image to realistic photograph，动漫转BJD娃娃，动漫转写实真人,和原图一样的表情控制，电影级光影",
       "clip": [
         "489",
         0
@@ -463,57 +446,12 @@
   "507": {
     "inputs": {
       "delimiter": "",
-      "string1": [
-        "546",
-        0
-      ],
-      "string2": [
-        "510",
-        0
-      ]
+      "string1": "transform the image to realistic photograph，动漫转BJD娃娃，动漫转写实真人,和原图一样的表情控制，电影级光影",
+      "string2": ""
     },
     "class_type": "JoinStrings",
     "_meta": {
       "title": "Join Strings"
-    }
-  },
-  "510": {
-    "inputs": {
-      "signal": [
-        "562",
-        0
-      ],
-      "value": [
-        "39",
-        0
-      ]
-    },
-    "class_type": "ImpactExecutionOrderController",
-    "_meta": {
-      "title": "Execution Order Controller"
-    }
-  },
-  "526": {
-    "inputs": {
-      "control_net_name": "Qwen-Image-ControlNet-Union.safetensors"
-    },
-    "class_type": "ControlNetLoader",
-    "_meta": {
-      "title": "加载ControlNet模型"
-    }
-  },
-  "527": {
-    "inputs": {
-      "preprocessor": "DWPreprocessor",
-      "resolution": 1024,
-      "image": [
-        "528",
-        0
-      ]
-    },
-    "class_type": "AIO_Preprocessor",
-    "_meta": {
-      "title": "AIO Aux Preprocessor"
     }
   },
   "528": {
@@ -529,76 +467,6 @@
     "class_type": "ImageScaleToTotalPixels",
     "_meta": {
       "title": "缩放图像（像素）"
-    }
-  },
-  "531": {
-    "inputs": {
-      "type": "auto",
-      "control_net": [
-        "526",
-        0
-      ]
-    },
-    "class_type": "SetUnionControlNetType",
-    "_meta": {
-      "title": "设置UnionControlNet类型"
-    }
-  },
-  "532": {
-    "inputs": {
-      "preprocessor": "DepthAnythingV2Preprocessor",
-      "resolution": 1024,
-      "image": [
-        "528",
-        0
-      ]
-    },
-    "class_type": "AIO_Preprocessor",
-    "_meta": {
-      "title": "AIO Aux Preprocessor"
-    }
-  },
-  "533": {
-    "inputs": {
-      "images": [
-        "532",
-        0
-      ]
-    },
-    "class_type": "PreviewImage",
-    "_meta": {
-      "title": "预览图像"
-    }
-  },
-  "536": {
-    "inputs": {
-      "strength": 1.0000000000000002,
-      "start_percent": 0,
-      "end_percent": 1,
-      "positive": [
-        "539",
-        0
-      ],
-      "negative": [
-        "540",
-        0
-      ],
-      "control_net": [
-        "531",
-        0
-      ],
-      "image": [
-        "532",
-        0
-      ],
-      "vae": [
-        "39",
-        0
-      ]
-    },
-    "class_type": "ControlNetApplyAdvanced",
-    "_meta": {
-      "title": "应用ControlNet（旧版高级）"
     }
   },
   "539": {
@@ -648,15 +516,6 @@
       "title": "文本编码（QwenImageEdit）"
     }
   },
-  "546": {
-    "inputs": {
-      "text": "transform the image to realistic photograph，动漫转BJD娃娃，动漫转写实真人,和原图一样的表情控制，电影级光影"
-    },
-    "class_type": "Text Multiline",
-    "_meta": {
-      "title": "Text Multiline"
-    }
-  },
   "554": {
     "inputs": {
       "unet_name": "qwen/qwen_image_edit_2511_int8_convrot.safetensors",
@@ -677,85 +536,6 @@
     "class_type": "PreviewImage",
     "_meta": {
       "title": "预览图像"
-    }
-  },
-  "562": {
-    "inputs": {
-      "text_0": "```text\n[SUBJECT], stunningly beautiful realistic woman with long flowing lavender hair, wearing a sexy red Christmas outfit with white fur trim, bell necklace, black belt, and white thigh-high stockings, posing on white bed sheets, [EYES], pink eyes looking directly into camera with intense piercing gaze, heavy blush on cheeks, slightly open mouth with tongue sticking out playfully, detailed iris texture, prominent catchlights in pupils, glossy lips, realistic skin texture with visible pores and subsurface scattering, [ENVIRONMENT], minimal background, soft white bed sheets, clean bright aesthetic, [LIGHTING], soft diffused lighting, high key photography, bright studio light, Rembrandt lighting, volumetric rays, [STYLE], masterpiece, best quality, photorealistic, 8k resolution, sharp focus, cinematic portrait, ultra-detailed, raw photo\n```",
-      "text": [
-        "563",
-        0
-      ]
-    },
-    "class_type": "ShowText|pysssss",
-    "_meta": {
-      "title": "Show Text 🐍"
-    }
-  },
-  "563": {
-    "inputs": {
-      "preset_prompt": "Normal - Describe",
-      "custom_prompt": "",
-      "system_prompt": "# Role\n你是一位专精于 **Flux.1/Midjourney 视觉逆向工程 (Visual Reverse-Engineer)** 的 AI 专家。你的核心能力是从参考图中提取这一秒的“光影灵魂”与“质感参数”，并将其转化为高精度的英文 Prompt。\n**特别使命**：你的 Prompt 将用于 **Image-to-Real-Person (人像转真人)** 任务。这意味着你必须对 **人物主体**，尤其是 **眼睛 (The Windows of the Soul)** 进行显微镜级别的分析与重建，确保生成的人物具有真实的“神韵”和明确的“镜头感”。\n# Goal\n当我发送一张图片时，请分析其视觉特征，输出一段**模块化、高权重的英文 Prompt**。\n这段 Prompt 旨在让 AI 复刻原图的**光影氛围与艺术风格**，同时确保人物（[SUBJECT]）转化为具有极高真实感、眼神有穿透力的真人/写实形象。\n# Analysis Framework (分析维度)\n## 0. Subject & Eyes (重中之重：主体与眼神)\n这是转绘成败的关键。请极其详尽地描述：\n*   **Eye Interaction (视线与神韵)**: \n    *   *Direct Gaze (破壁)*: Looking directly into camera, eye contact, piercing gaze, intense focus.\n    *   *Off-Camera (旁观)*: Looking away, gazing at distance, lost in thought, side profile glance.\n    *   *Expression*: Describe the micro-emotion in the eyes (e.g., deadpan, alluring, tearing, fierce).\n*   **Eye Structure (物理细节)**: Detailed iris (虹膜纹理), catchlights (眼神光/反光), symmetric eyes, sharp focus on eyes, moisture in eyes (湿润感), clearly defined eyelashes.\n*   **Skin & Realism (皮肤与真实感)**: Skin texture, pores, subversive realism, vellus hair (绒毛), imperfections (moles, freckles), subsurface scattering (SSS泛红感).\n## 1. Environment (场景构建)\n*   **Context**: 背景是虚化还是清晰？是具体的（Concrete Cafe, Neon Street）还是抽象的（Solid Color, Gradient, Abstract Shapes）？\n*   **Material**: 画面中占主导的材质（Chrome, Silk, Rough Concrete, Matte Plastic）。\n## 2. Lighting (光影布局 - 决定立体感)\n*   **Direction**: Front lighting (平光), Side lighting (侧光/显瘦), Backlighting (逆光/轮廓光), Rembrandt lighting (伦勃朗光).\n*   **Quality**: Hard shadows (硬阴影/高对比), Soft diffusion (柔光/影棚感), Volumetric lighting (体积光/丁达尔效应).\n*   **Special**: Cinematic lighting, neon rim light, natural window light.\n## 3. Color & Mood (调色与胶片感)\n*   **Palette**: 具体的配色方案 (e.g., Teal and Orange, Pastel Goth, Monochromatic Red).\n*   **Vibe**: Moody, Ethereal, Cyberpunk, Vintage, Minimalist.\n## 4. Photography/Art Style (摄影参数)\n*   **Camera**: Shot on 35mm, 85mm portrait lens, Macro lens.\n*   **Aperture/DoF**: f/1.8 (shallow depth of field, bokeh background), f/8 (everything in focus).\n*   **Texture**: Film grain (ISO 400), polaroid texture, clean digital look.\n*   **Engine (如果是风格化)**: Unreal Engine 5 render, Octane Render, Ray Tracing.\n# Output Rules\n1.  **Format**: 输出唯一的 Prompt 代码块，不包含任何解释性文字。\n2.  **Order**: 必须遵循 `[SUBJECT] + [Eyes/Face Details] + [Environment] + [Lighting/Style]` 的顺序。\n3.  **Keywords**: 使用逗号分隔的英文短语。\n4.  **Keyword Hacks**: 自动混入 `best quality`, `photorealistic`, `masterpiece`, `sharp focus` 等增效词。\n# Trigger Example\n**User Input**: [发送一张二次元大头贴]\n**Your Output**:\n```text\n[SUBJECT], stunningly beautiful real human portrait, extremely detailed eyes, looking directly into camera with piercing gaze, catchlights in pupils, detailed iris texture, natural skin texture with visible pores, soft peach fuzz, 35mm photography, soft studio lighting, rembrandt lighting, bokeh background, muted pastel colors, dreamy atmosphere, 8k resolution, hyperrealistic, best quality",
-      "inference_mode": "images",
-      "max_frames": 24,
-      "max_size": 256,
-      "seed": 941221084117913,
-      "force_offload": false,
-      "save_states": false,
-      "llama_model": [
-        "565",
-        0
-      ],
-      "parameters": [
-        "564",
-        0
-      ],
-      "images": [
-        "243",
-        0
-      ]
-    },
-    "class_type": "llama_cpp_instruct_adv",
-    "_meta": {
-      "title": "Llama-cpp Instruct"
-    }
-  },
-  "564": {
-    "inputs": {
-      "max_tokens": 1024,
-      "top_k": 30,
-      "top_p": 0.9,
-      "min_p": 0.05,
-      "typical_p": 1,
-      "temperature": 0.8,
-      "repeat_penalty": 1,
-      "frequency_penalty": 0,
-      "present_penalty": 1,
-      "mirostat_mode": 0,
-      "mirostat_eta": 0.1,
-      "mirostat_tau": 5,
-      "state_uid": 0
-    },
-    "class_type": "llama_cpp_parameters",
-    "_meta": {
-      "title": "Llama-cpp Parameters"
-    }
-  },
-  "565": {
-    "inputs": {
-      "model": "Qwen3.6-35B-A3B-UD-Q2_K_XL.gguf",
-      "mmproj": "mmproj-Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive-f16.gguf",
-      "chat_handler": "Qwen3.5",
-      "n_ctx": 8192,
-      "vram_limit": -1,
-      "image_min_tokens": 0,
-      "image_max_tokens": 0,
-      "load_mtp": false
-    },
-    "class_type": "llama_cpp_model_loader",
-    "_meta": {
-      "title": "Llama-cpp Model Loader"
     }
   },
   "566": {

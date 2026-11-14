@@ -12,23 +12,6 @@
       "title": "保存图像"
     }
   },
-  "36": {
-    "inputs": {
-      "text1": [
-        "40",
-        0
-      ],
-      "text2": "",
-      "text3": "",
-      "text4": "",
-      "combine_order": "",
-      "separator": ","
-    },
-    "class_type": "TextConcatenator",
-    "_meta": {
-      "title": "文本拼接🐠meeeyo.com"
-    }
-  },
   "37": {
     "inputs": {
       "max_tokens": 2048,
@@ -43,7 +26,8 @@
       "mirostat_mode": 0,
       "mirostat_eta": 0.1,
       "mirostat_tau": 5,
-      "state_uid": 0
+      "state_uid": 0,
+      "presence_penalty": 0.0
     },
     "class_type": "llama_cpp_parameters",
     "_meta": {
@@ -71,7 +55,9 @@
       "parameters": [
         "37",
         0
-      ]
+      ],
+      "presence_penalty": 0.0,
+      "frequency_penalty": 0.0
     },
     "class_type": "llama_cpp_instruct_adv",
     "_meta": {
@@ -87,7 +73,9 @@
       "vram_limit": -1,
       "image_min_tokens": 0,
       "image_max_tokens": 0,
-      "load_mtp": false
+      "load_mtp": false,
+      "presence_penalty": 0.0,
+      "frequency_penalty": 0.0
     },
     "class_type": "llama_cpp_model_loader",
     "_meta": {
@@ -145,12 +133,13 @@
     }
   },
   "48": {
+    "class_type": "UNETLoader",
     "inputs": {
-      "ckpt_name": "Zimage/Z-Image-Base-8steps-White_Marble-AIO_v2-bf16.safetensors"
+      "unet_name": "Zimage/z_image_turbo_bf16.safetensors",
+      "weight_dtype": "default"
     },
-    "class_type": "CheckpointLoaderSimple",
     "_meta": {
-      "title": "Checkpoint加载器（简易）"
+      "title": "UNETLoader (原 White_Marble checkpoint)"
     }
   },
   "49": {
@@ -186,12 +175,12 @@
   "50": {
     "inputs": {
       "text": [
-        "36",
+        "40",
         0
       ],
       "clip": [
-        "48",
-        1
+        "71",
+        0
       ]
     },
     "class_type": "CLIPTextEncode",
@@ -261,8 +250,8 @@
         0
       ],
       "vae": [
-        "48",
-        2
+        "72",
+        0
       ]
     },
     "class_type": "VAEDecode",
@@ -384,7 +373,7 @@
     "inputs": {
       "text_0": "A professional clean four-view character turnaround benchmark sheet, on a single seamless pure white industrial studio background, no borders, no frames, no dividing lines, no panel edges, no rounded corners anywhere arranged horizontally side-by-side, seamless pure white industrial studio background, no shadows, technical reference model sheet, orthographic views, maximum consistency across all panels.\n\nYoung East Asian female cybernetic android with natural stance, arms hanging naturally at sides, hands relaxed, standard realistic human proportions, highly detailed character design reference sheet.\n\nPanel 1/4 (Head Close-up): Extreme close-up portrait from front, only head and shoulders, razor sharp 8K facial details, perfect reproduction of facial bone structure, cold-toned porcelain skin texture with a smooth, synthetic sheen, makeup consists of sharp smoky eyeshadow in matte silver-grey tones, low-saturation dusty pink matte lipstick, precise eyeliner; intricate shoulder-length straight hair with deep black base and silver-blue挑染 (tweeds), fine metallic luster on individual strands, sleek finish; neutral cool expression with sharp gaze, clean neck and shoulder area fully visible; wearing integrated matte titanium smart AR glasses with monolithic design, light blue anti-reflective coating lenses, temple arms embedded with thin strip cold blue LED indicator lights extending to the cheekbone, revealing exposed silver precision mechanical endoskeleton structure on the right temple area extending to the cheek, surface features etched circuit board textures and faint ice-blue glowing status LEDs, fine grain texture on metal casing.\n\nPanel 2/4 (Front Full Body): Full body front view, neutral standing pose, arms naturally hanging at sides, hands relaxed, straight posture, 1:1 realistic body proportions, wearing futuristic laser-future functionalist suit ensemble. Base layer is high-neck slim-fit laser holographic bodysuit made of smart fabric that shifts between silver-purple-blue tri-color iridescent rainbow luster depending on light angle, surface embedded with fine dark pattern conductive circuit lines; outer layer is short cropped matte black tactical vest with modular quick-release buckles and reflective strip decorations, structured stitching; high-waisted slim-fit cargo trousers featuring multiple 3D utility pockets and ankle strap design, knees embedded with semi-transparent mechanical armor plates showing internal gear structures; footwear consists of thick-soled platform futuristic sneakers with reflective strips and laser decorative bands, rubber sole texture with tread details.\n\nPanel 3/4 (Side Full Body): Full body side view (profile), same neutral standing pose, arms naturally at sides, maintaining exact same body proportions and details, showcasing the side profile of the silver-blue hair weave, the depth of the layered laser bodysuit and matte black vest, the structural lines of the cargo pants' 3D pockets, the profile of the mechanical knee armor, the side view of the AR glasses' temple extension and cheek-mounted endoskeleton, and the bulk of the thick-soled sneaker.\n\nPanel 4/4 (Back Full Body): Full body back view, same neutral standing pose, arms naturally at sides, maintaining exact same body proportions and details, showing the straight back silhouette of the high-neck laser bodysuit, the cropped length and seam placement of the matte black tactical vest, the rear panel design of the cargo pants with utility loops, the sleek contour of the metallic choker with mini data port visible at the nape, and the clean lines of the futuristic sneaker sole.\n\nGlobal Consistency Constraints:\n\nPerfect 100% identity consistency across all four panels — identical face, exact same hairstyle and hair flow (deep black with silver-blue metallic tints), identical body shape and proportions, identical clothing in every angle. Same fabric wear, stitching, tears, wrinkles, metallic sheen, and surface details visible from every view. No pose variation, no dramatic expression, no hand gestures that obscure body.\n\nClothing & Material Details:\n\nCharacter wearing complete futuristic laser-functional outfit in all views, consisting of iridescent smart-fabric bodysuit (silver-purple-blue gradient with conductive circuit print), matte black tactical vest (textured synthetic leather with modular buckles), high-waisted cargo trousers (durable technical nylon with 3D pockets and mechanical knee inserts), thick-soled platform sneakers (matte rubber with reflective strips and laser accents), fine silver metallic choker (polished steel with micro-data port), and integrated titanium AR glasses (brushed titanium with LED indicators and exposed cheek-mounted endoskeleton). Precise tailoring, visible stitching lines, realistic fabric folds, material wear and tear, metallic reflections and matte textures all consistently rendered.\n\nTechnical & Quality Constraints:\n\n8K ultra sharp resolution, infinite depth of field (F/32), zero bokeh, everything in perfect razor focus, flat diffuse studio lighting with even illumination from all angles, no strong shadows, no ambient color cast, pure technical white background, maximum material detail and surface fidelity, cinematic yet documentary reference style.\n\nsingle continuous white backdrop with no panel borders or separations.",
       "text": [
-        "36",
+        "40",
         0
       ]
     },
@@ -783,6 +772,20 @@
       "69:offload_device": "offload_device_3",
       "69:enable_debug": "enable_debug",
       "70:text_0": "text_0"
+    }
+  },
+  "71": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "qwen_3_4b.safetensors",
+      "type": "qwen_image",
+      "device": "default"
+    }
+  },
+  "72": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "ae.safetensors"
     }
   }
 }

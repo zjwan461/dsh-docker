@@ -187,7 +187,8 @@
       "mirostat_mode": 0,
       "mirostat_eta": 0.1,
       "mirostat_tau": 5,
-      "state_uid": 0
+      "state_uid": 0,
+      "presence_penalty": 0.0
     },
     "class_type": "llama_cpp_parameters",
     "_meta": {
@@ -219,7 +220,9 @@
       "queue_handler": [
         "133",
         0
-      ]
+      ],
+      "presence_penalty": 0.0,
+      "frequency_penalty": 0.0
     },
     "class_type": "llama_cpp_instruct_adv",
     "_meta": {
@@ -235,7 +238,9 @@
       "vram_limit": -1,
       "image_min_tokens": 0,
       "image_max_tokens": 0,
-      "load_mtp": false
+      "load_mtp": false,
+      "presence_penalty": 0.0,
+      "frequency_penalty": 0.0
     },
     "class_type": "llama_cpp_model_loader",
     "_meta": {

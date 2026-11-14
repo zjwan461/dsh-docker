@@ -8,7 +8,7 @@
       "scheduler": "beta57",
       "denoise": 1,
       "model": [
-        "503",
+        "502",
         0
       ],
       "positive": [
@@ -165,23 +165,9 @@
   "502": {
     "inputs": {
       "lora_name": "Qwen/Kook_Qwen_V3极致真实.safetensors",
-      "strength_model": 0.5000000000000001,
-      "model": [
-        "287",
-        0
-      ]
-    },
-    "class_type": "LoraLoaderModelOnly",
-    "_meta": {
-      "title": "LoRA加载器（仅模型）"
-    }
-  },
-  "503": {
-    "inputs": {
-      "lora_name": "Qwen/Kook_Qwen_真实幻想V2.safetensors",
       "strength_model": 0.8,
       "model": [
-        "502",
+        "287",
         0
       ]
     },

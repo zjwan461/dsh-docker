@@ -47,7 +47,8 @@
       "reference_audio": [
         "21",
         0
-      ]
+      ],
+      "offload_to_cpu": false
     },
     "class_type": "FishS2VoiceCloneTTS",
     "_meta": {

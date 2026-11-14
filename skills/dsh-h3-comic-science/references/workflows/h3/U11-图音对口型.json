@@ -118,10 +118,12 @@
   "131": {
     "inputs": {
       "expression": "max(5, round(a * 24)) + (5 - (max(5, round(a * 24)) % 17)) % 17",
-      "values.a": [
-        "155",
-        1
-      ]
+      "values": {
+        "a": [
+          "155",
+          1
+        ]
+      }
     },
     "class_type": "ComfyMathExpression",
     "_meta": {
