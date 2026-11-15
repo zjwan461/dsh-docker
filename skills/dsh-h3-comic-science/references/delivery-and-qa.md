@@ -134,3 +134,13 @@ python qa.py clips/*.mp4 --json qa.json
 - [ ] 简介里的事实/数字逐条核过
 - [ ] AI 生成标注、音乐版权、肖像权
 - [ ] 抽 5 帧肉眼扫一遍，再发
+
+---
+
+## 9. 合片三坑
+
+- **filter 级 concat 要求每段分辨率一致**：只要有一镜是别的尺寸（例如静帧做的慢推），每路都要先 `scale=1080:1920:flags=lanczos,setsar=1` 再进 concat，否则报 `Input link in0:v0 parameters (size ...) do not match`。
+- **静帧做的慢推要配静音轨**：`-f lavfi -i anullsrc=r=48000:cl=mono`，否则 concat 的 `[i:a]` 匹配不到流（`Stream specifier ':a' ... matches no streams`）。
+- **人物小、灯多、易崩的远景，用静帧 + `zoompan` 代替 i2v**：
+  `zoompan=z='if(lte(on,1),1.10,max(1.0,zoom-0.0010))':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=107:s=1080x1920:fps=24`
+  零伪影、几秒钟出片，比 4 步 i2v 还稳。

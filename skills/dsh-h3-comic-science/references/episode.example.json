@@ -1,0 +1,52 @@
+{
+  "_comment": "单集清单示例：python scripts/episode.py run --plan episode.json。ref 可以是上一个镜头的 id，也可以是绝对路径。",
+  "base": "http://127.0.0.1:8188",
+  "out_dir": "E:/ComfyUI/output/ep01",
+  "width": 768,
+  "height": 1344,
+  "shots": [
+    {
+      "id": "s1",
+      "kind": "still",
+      "seed": 101,
+      "prompt": "Vertical cinematic still. A 24-year-old Chinese woman sits on a mattress in a small rented room at night, wearing an oatmeal knit sweater. Cardboard boxes, an open suitcase, a warm desk lamp, a window taped over with packing tape, city lights outside. She looks down at her phone, faint smile just forming. Photoreal, warm tungsten key light, shallow depth of field."
+    },
+    {
+      "id": "s2",
+      "kind": "edit",
+      "ref": "s1",
+      "seed": 102,
+      "prompt": "Same woman, same room, same clothes and lighting. Reframe to a medium shot from slightly lower angle: she holds the phone to her right ear with her right hand, laughing with her mouth open, left hand resting naturally on her knee and not covering her face. Keep her face fully visible."
+    },
+    {
+      "id": "s3",
+      "kind": "crop",
+      "ref": "s2",
+      "box": [180, 230, 640, 1050]
+    },
+    {
+      "id": "s4",
+      "kind": "shot",
+      "ref": "s2",
+      "frames": 107,
+      "steps": 8,
+      "seed": 104,
+      "prompt_file": "prompts/q_s2.txt"
+    },
+    {
+      "id": "s5",
+      "kind": "shot",
+      "ref": "s3",
+      "frames": 107,
+      "steps": 4,
+      "seed": 105,
+      "prompt_file": "prompts/q_s3.txt"
+    },
+    {
+      "id": "s6",
+      "kind": "pan",
+      "ref": "s1",
+      "seconds": 4.46
+    }
+  ]
+}

@@ -359,3 +359,12 @@ The camera pushes in with large amplitude at slow speed into the pupil until bla
 - [ ] 穿入转场先填满画面再穿出
 - [ ] 硬切没加多余淡化
 - [ ] 15 秒内没有 7 个以上镜头（除非 ULTRA_SPEED）
+
+---
+
+## 锁机位：别写"不要动"
+
+- **"a very slow push in" 会变成持续重构图**：4.5 秒里画面一直在缩、机位在找。锁死要写成状态句：`The camera is on a tripod and does not move.` 别再叠 push/pull/dolly 之外的过渡词。
+- **否定词进 H3 会反噬**：加 `nothing floats in front of the lens` 之后，镜头前的漂浮光斑/颗粒反而**变多**（同 seed 删掉即干净）。原则：只描述"画面里有什么"，不描述"没有什么"。
+- 但也不能一路删：把姿态和房间描述删空后人物会崩（发光剪影、手臂拉长）。**保留姿态 + 会动的物件，删掉一切关于空气、颗粒、特效的措辞。**
+- 远景（人小、灯多、有浮尘）本质上是 i2v 的弱项。要一个稳的收尾镜头，宁可**静帧 + `zoompan` 缓推**，也别硬生成（见 `delivery-and-qa.md` §9）。

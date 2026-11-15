@@ -79,3 +79,18 @@
 悲伤: in a quiet, cracking voice, moist eyes, lips pressing between words
 倾听: (listener) holds eye contact, blinks once after the key word, one mouth corner lifts while eyes stay sad
 ```
+
+---
+
+## 9. 有台词的镜头必须 8 步（4 步 turbo 会听不清）
+
+同一首帧、同一 seed、只换步数（`fl2va` + turbo LoRA，768×1344 / 107 帧）：
+
+| 配置 | 耗时 | whisper small 转写 |
+|---|---|---|
+| 4 步 `minimax_h3_fl2v_turbo_4step_v1.2_768p` | 125 s | `妈呀 我上去啦`（原句「妈，我升职了」） |
+| 8 步 `minimax_h3_fl2v_turbo_8step_v1.0_768p` | 210 s | `妈 我升职了` |
+
+- 4 步像"含着一口水说话"：字头糊、韵母拖，短视频里观众会当成配音事故。
+- 规则：**说话镜 8 步，不说话镜（环境声/画外音/纯动作）4 步**。5 镜短片按此分档 ≈ 210 + 4×125 s。
+- 验收别靠耳朵：`whisper` 转写该镜音轨，字错就加步数。
