@@ -356,35 +356,21 @@
   "30": {
     "inputs": {
       "expression": "max(5, round(a * 24)) + (5 - (max(5, round(a * 24)) % 17)) % 17",
-      "values": {
-        "a": [
-          "27",
-          0
-        ]
-      }
+      "values.a": [
+        "27",
+        0
+      ]
     },
     "class_type": "ComfyMathExpression",
     "_meta": {
       "title": "数学表达式"
     }
   },
-  "32": {
-    "inputs": {
-      "model": [
-        "5",
-        0
-      ]
-    },
-    "class_type": "MiniMaxH3MemoryEfficientSageAttentionPatch",
-    "_meta": {
-      "title": "MiniMax H3 Mem Eff Sage Attention Patch"
-    }
-  },
   "33": {
     "inputs": {
       "attention": "pytorch attention",
       "model": [
-        "32",
+        "5",
         0
       ]
     },

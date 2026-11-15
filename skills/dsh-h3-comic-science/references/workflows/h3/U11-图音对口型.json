@@ -97,7 +97,7 @@
   },
   "128": {
     "inputs": {
-      "clip_name": "qwen3vl_32b_minimax_h3_int8_convrot.safetensors",
+      "clip_name": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
       "type": "minimax",
       "device": "default"
     },
@@ -118,12 +118,10 @@
   "131": {
     "inputs": {
       "expression": "max(5, round(a * 24)) + (5 - (max(5, round(a * 24)) % 17)) % 17",
-      "values": {
-        "a": [
-          "155",
-          1
-        ]
-      }
+      "values.a": [
+        "155",
+        1
+      ]
     },
     "class_type": "ComfyMathExpression",
     "_meta": {

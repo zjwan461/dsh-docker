@@ -193,8 +193,8 @@
         0
       ],
       "vae": [
-        "301",
-        2
+        "902",
+        0
       ]
     },
     "class_type": "VAEDecode",
@@ -209,8 +209,8 @@
         0
       ],
       "vae": [
-        "301",
-        3
+        "903",
+        0
       ]
     },
     "class_type": "VAEDecodeAudio",
@@ -237,7 +237,7 @@
       "sink_conditioning": "exact_kv_and_rows",
       "verbose": false,
       "model": [
-        "301",
+        "900",
         0
       ]
     },
@@ -375,8 +375,8 @@
         0
       ],
       "vae": [
-        "301",
-        2
+        "902",
+        0
       ]
     },
     "class_type": "ModelPreviewOverrideKJ",
@@ -429,51 +429,6 @@
       "title": "ZealmanH3素材选择"
     }
   },
-  "301": {
-    "inputs": {
-      "unet_name": "minimax/Minimax-h3_Singularity_ref2va_Pruned_v1.3_int8.safetensors",
-      "weight_dtype": "default",
-      "clip_name": "qwen3vl_32b_minimax_h3_int8_convrot.safetensors",
-      "clip_device": "default",
-      "video_vae": "minimax_h3_video_vae_int8_convrot.safetensors",
-      "audio_vae": "minimax_h3_audio_vae_fp32.safetensors",
-      "attention": "comfy kitchen attention",
-      "lora_1": {
-        "on": true,
-        "lora": "minimax/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors",
-        "strength": 1
-      },
-      "lora_2": {
-        "on": false,
-        "lora": "minimax/MysticXXX_MMH3-V1.safetensors",
-        "strength": 0.45
-      },
-      "lora_3": {
-        "on": false,
-        "lora": "minimax/H3_Combat_V2.safetensors",
-        "strength": 0.65
-      },
-      "lora_4": {
-        "on": false,
-        "lora": "minimax/Motion_Repair_V2.safetensors",
-        "strength": 0.35
-      },
-      "lora_5": {
-        "on": false,
-        "lora": "minimax/H3_Fight_Flow_V1.safetensors",
-        "strength": 0.35
-      },
-      "lora_6": {
-        "on": false,
-        "lora": "minimax/motion_speed_slider_mmh3_v1.1.safetensors",
-        "strength": 3
-      }
-    },
-    "class_type": "ZealmanH3ModelLoader",
-    "_meta": {
-      "title": "ZealmanH3模型加载"
-    }
-  },
   "303": {
     "inputs": {
       "prompt": [
@@ -494,16 +449,16 @@
       ],
       "ref_image_size": "max",
       "clip": [
-        "301",
-        1
+        "901",
+        0
       ],
       "vae": [
-        "301",
-        2
+        "902",
+        0
       ],
       "audio_vae": [
-        "301",
-        3
+        "903",
+        0
       ],
       "ref_images.ref_image_0": [
         "259",
@@ -896,6 +851,32 @@
       "303:ref_image_size": "ref_image_size",
       "313:offload_model": "offload_model",
       "313:offload_cache": "offload_cache"
+    }
+  },
+  "900": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "minimax/Minimax-h3_Singularity_ref2va_Pruned_v1.3_int8.safetensors",
+      "weight_dtype": "default"
+    }
+  },
+  "901": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+      "type": "minimax"
+    }
+  },
+  "902": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "minimax_h3_video_vae_int8_convrot.safetensors"
+    }
+  },
+  "903": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "minimax_h3_audio_vae_fp32.safetensors"
     }
   }
 }
