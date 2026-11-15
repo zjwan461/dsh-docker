@@ -8,7 +8,7 @@
       "scheduler": "beta57",
       "denoise": 1,
       "model": [
-        "502",
+        "503",
         0
       ],
       "positive": [
@@ -165,7 +165,7 @@
   "502": {
     "inputs": {
       "lora_name": "Qwen/Kook_Qwen_V3极致真实.safetensors",
-      "strength_model": 0.8,
+      "strength_model": 0.5,
       "model": [
         "287",
         0
@@ -526,6 +526,17 @@
       "514:mode": "mode",
       "515:value": "value",
       "516:value": "value_2"
+    }
+  },
+  "503": {
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": {
+      "lora_name": "Qwen/Kook_Qwen_真实幻想V2.safetensors",
+      "strength_model": 0.8,
+      "model": [
+        "502",
+        0
+      ]
     }
   }
 }
