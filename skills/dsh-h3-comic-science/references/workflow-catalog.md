@@ -21,6 +21,7 @@
 |---|---|---|
 | A01 文生图 Qwen2512 高清放大 | 高质量静帧 + 放大 | `qwen_image_2512_fp8` + Lightning 4step + 两个写实 LoRA + `SeedVR2VideoUpscaler` |
 | A08 洗图 二次元→真人 | **动漫脸转写实**（漫剧转实拍、AI 感清洗） | `AnythingtoRealCharacters2511_20` LoRA；两条 3 段式采样 |
+| A08b 洗图 Krea2 二次元→真人 | **同目的换 Krea2 底模**：20 秒出 2048，皮肤质感更真；代价是 img2img 会改脸型 | Krea2 + `Krea2_Anything2RealCharacters-V3`（0.9）+ `SeedVR2VideoUpscaler` |
 | B13 角色一键多角度 | **一次出多个角度**（三视图/多机位） | `qwen_image_edit_2509` + `TextEncodeQwenImageEditPlus` ×8 并行 + `CFGNorm` |
 | B18 Qwen-Image 2.1 | 新一代底模文生图 | `qwen_image_2.1_int8` + `qwen3vl_8b` + `TextEncodeQwenImage21` |
 | B20 Qwen-Image 2.1 Turbo 编辑 | 快速编辑 | `ManualSigmas` + `SamplerCustom`（自定义 sigma 表） |
@@ -82,7 +83,7 @@
 | 需求 | 首选 | 备选 |
 |---|---|---|
 | 角色三视图/多角度 | **B13（Qwen Edit 多角度）**、T4/T10（Krea2） | C19（Z-Image + LLM 扩写） |
-| 动漫→写实洗图 | **A08（AnythingtoReal）** | D20（RAW 重建） |
+| 动漫→写实洗图 | **A08（AnythingtoReal，保构图）** / **A08b（Krea2，更真但改脸）** | D20（RAW 重建） |
 | 静帧高清放大 | A01（SeedVR2） | C18 三采 |
 | 对白/口播口型 | **U11（H3 图+音对口型）** | J13（InfiniteTalk 长片） |
 | 跨集同音色 | **N2（FishAudio 克隆）** | 参考音频（H3 r2v） |

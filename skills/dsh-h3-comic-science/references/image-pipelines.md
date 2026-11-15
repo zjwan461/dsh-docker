@@ -67,6 +67,17 @@ perfectly consistent across all three views.
 - 洗图会**改变脸型**；洗完后重新做三视图，不要拿旧图当身份锚点。
 - 洗图后的角色**不要和洗图前的镜头混剪**——观众会觉得换了演员。
 
+**两条路选哪条**：
+
+| | A08（Qwen-Edit + AnythingtoReal） | A08b（Krea2 + Anything2RealCharacters-V3） |
+|---|---|---|
+| 速度 | 约 160 秒（含 SeedVR2 放大） | **约 20 秒** |
+| 保脸 | 编辑式，构图与五官保留得多 | img2img，denoise 0.75 会明显重画 |
+| 质感 | 略"渲染感/BJD 娃娃" | 皮肤毛孔、碎发是实的，更像实拍 |
+| 适合 | 要沿用原分镜构图、只清 AI 感 | 要"换成一个真人演员"、追求实拍感 |
+
+A08b 的 denoise 是保脸/换人的旋钮：0.55–0.65 介于渲染与真人之间，0.75 明显换脸。触发词 `transform the image to realistic photograph`（作者 README 里给的）。
+
 ---
 
 ## 4. 高清放大与两遍采样

@@ -33,6 +33,7 @@ workflows/
 |---|---|
 | `A01-Qwen2512文生图放大.json` | Qwen-Image-2512 + Lightning + SeedVR2 放大 |
 | `A08-二次元转真人.json` | AnythingtoRealCharacters，动漫脸转写实 |
+| `A08b-Krea2二次元转真人.json` | **Krea2 版洗图**：`Krea2_Anything2RealCharacters-V3` 0.9 + img2img(0.75) + SeedVR2，20 秒出 2048 真人 |
 | `B13-角色多角度.json` | Qwen-Image-Edit 多角度并行（三视图/多机位） |
 | `C19-三视图zimage双采.json` | Z-Image + 本地 LLM 扩写 + 双采 |
 | `T4-Krea2三视图.json` | Krea2 角色三视图 |
