@@ -237,7 +237,7 @@
       "sink_conditioning": "exact_kv_and_rows",
       "verbose": false,
       "model": [
-        "900",
+        "905",
         0
       ]
     },
@@ -877,6 +877,17 @@
     "class_type": "VAELoader",
     "inputs": {
       "vae_name": "minimax_h3_audio_vae_fp32.safetensors"
+    }
+  },
+  "905": {
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": {
+      "model": [
+        "900",
+        0
+      ],
+      "lora_name": "minimax/minimax_h3_turbo_v4_step600_ema_pruned_comfyui.safetensors",
+      "strength_model": 1.0
     }
   }
 }

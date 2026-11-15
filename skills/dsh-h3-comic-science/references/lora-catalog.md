@@ -20,8 +20,17 @@ H3 的 LoRA 分四类：**加速**、**风格**、**功能**、**动作/修复**
 | 只换头（保口型） | `minimax_h3_head_swap_v1.0_r32` | 1.0 | 20 | 可和 character_swap 叠 |
 | 选择性换脸 | `minimax_h3_character_swap_v1.0_preprocessor_map_fro099` | 1.0 | 20 | 需 normal map/DWPose |
 | 混合加速（实验） | `minimax_h3_turbo_4step_10ErosMax_*` / `minimax_h3_turbo_v4_step600_ema_*` | 0.5–0.9 | 4 | U24 里分遍叠，不稳定 |
+| 打斗连贯（社区） | `minimax/H3_Fight_Flow_V1` | 0.35 | — | 与 Combat 叠，专治"套招断" |
+| 动作修复 V2 | `minimax/Motion_Repair_V2` | 0.35 | — | 旧版 `Motion_Repair` 的加强版 |
+| 动作幅度 | `minimax/H3_speed_slider_1.1` | 3.0 | — | 只打在 `token_refiner` 上（3 个张量），3.0 是"常规"档 |
 
 > 模型名以你服务器 `object_info` 为准；上面是仓库里的实际文件名。
+
+**turbo 的实测效果（U06V9，512×288/1s）**：不挂 turbo 8 步 371s；挂 turbo 8 步 390s（**没有更快**）；挂 turbo 砍到 4 步 **260s（-33%）**，画面结构一致、只是略软。所以 turbo 的价值是**允许少步数**，不是它自己加速。
+
+**判断 LoRA 有没有生效别看 `patches attached`**：它在只挂 turbo 和同时挂 turbo+Combat+Fight_Flow 时**都是 208**——那数字是被打补丁的权重个数，不是 LoRA 个数。要看画面，或看日志里有没有 `lora ... shape is invalid` / `lora key not loaded`。
+
+**武打链的接法（API 格式没有 bypass，只能删节点或串起来）**：`UNETLoader → turbo(1.0) → H3_Combat_V2(0.65) → H3_Fight_Flow_V1(0.35) → 采样器`，4 步；实测 280s 出片，画面里机位更宽、多了环境建筑，确实吃到了 LoRA。
 
 ---
 

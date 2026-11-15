@@ -51,6 +51,10 @@ workflows/
 | `N2-FishAudio声音克隆.json` | 参考音 → 克隆 TTS |
 
 > `h3_*_api.json` 是**官方模板的节点图**转成的 API 格式；`U*` / `A*` / `B*` / `C*` / `T*` / `G*` / `P*` / `H*` / `Y*` / `J*` / `N*` 是社区工作流原件（保留原节点与默认参数）。社区工作流依赖各自的自定义节点（T8 / Licon / KJ / rgthree / llama_cpp 等），缺节点时会报红——提交前先 `validate`。
+>
+> **`validate` 只是"名字和类都对得上"，不是验收**：它不校验 combo 值（模型名）和必填项，会把错的判成 OK。真正判据是提交一次——报 `value_not_in_list` 才算摸到真问题。
+>
+> **三套有"跑之前先看一眼"的前置条件**：`E1` 的场景参考图必须空棚（带人会出两个人）；`J13` 的三个加载器各认一个固定目录（`audio_encoders` / `model_patches` / `diffusion_models`）；`N2` 首次跑要自己下 11GB 的 `s2-pro`。细节见 `references/talking-head.md` 与 `references/face-swap.md` §12。
 
 ## 用法
 

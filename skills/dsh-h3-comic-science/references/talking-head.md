@@ -67,6 +67,18 @@ VHS_LoadAudioUpload(音频) ─→ DenoAudioTranscript / TextGenerate（把音�
 
 代价：节点多、耗时长、段间仍可能轻微跳变；**必须逐段验收**。
 
+**实测**：512×288、2 秒、4 步 → 153 秒出片（`InfiniteTalk_00001-audio.mp4`，832×480 / 25fps / AAC 16k），嘴型跟得住。
+
+**三个加载器各认一个固定目录，放错就是 `value_not_in_list`**（三个文件都在盘上也照样空列表）：
+
+| 节点 | 文件放哪 |
+|---|---|
+| `AudioEncoderLoader` | `models/audio_encoders/` |
+| `ModelPatchLoader` | `models/model_patches/` |
+| `MelBandRoFormerModelLoader` | `models/diffusion_models/`（源码写死，**不看** `melbandroformer/` 子目录） |
+
+判据：报错写 `not in []` = 目录不存在；写 `not in (list of length 34)` = 目录对了、文件名不对（第三个最阴，它的候选列表是整个 `diffusion_models`，看到一长串会误判）。移完文件不必重启服务。
+
 ---
 
 ## 4. C：声音克隆（N2 FishAudio S2 pro）
@@ -82,6 +94,10 @@ LoadAudio(参考音) → Apply Whisper(转写) → FishS2VoiceCloneTTS(文本 + 
 用途：跨集同音色、给外星人这种"非人声"做统一音色、旁白。
 
 注意：**克隆的是音色，不是情绪**。情绪仍要在文本/提示里给（或换参考音频的情绪版本）。
+
+**首次跑要下 11GB**：`s2-pro` 是 4B 全精度（codec 1.9GB + 两个分片 9.1GB），节点用 `snapshot_download` 自己下到 `models/fishaudioS2/s2-pro`。国内先设 `HF_ENDPOINT=https://hf-mirror.com` 再跑，否则下载卡住还会报 `FileNotFoundError: model-00001-of-00002.safetensors`；中途断过就重启服务重跑。**实测**：模型齐了以后 50 秒出 6.97 秒音频（44.1kHz 单声道），回喂 whisper 转写能听懂 → 确认是人声不是噪音。
+
+`Apply Whisper` 的 `model` 默认 `large-v3`（约 3GB，首次也自己下）；只做冒烟/转写校验用 `tiny`（72MB）就够。
 
 ---
 
