@@ -25,7 +25,7 @@ RATE=20M COMFY_ROOT=/path/to/ComfyUI bash references/workflows/fetch-models.sh
 **先看清单再下**：
 
 ```bash
-python scripts/models.py scan     # 54 个依赖文件，含"被哪个工作流用到"
+python scripts/models.py scan     # 58 个依赖文件，含"被哪个工作流用到"
 ```
 
 ---
@@ -34,12 +34,12 @@ python scripts/models.py scan     # 54 个依赖文件，含"被哪个工作流�
 
 | 状态 | 数量 | 说明 |
 |---|---|---|
-| 自动解析 | **31** | 官方仓库 + 可查到的社区仓库，脚本里已有 URL |
-| 需手工 | 23 | 中文社区 LoRA（哩布/Civitai 为主），HF 上没有稳定直链 |
+| 自动解析 | **36** | 官方仓库 + 可查到的社区仓库，脚本里已有 URL |
+| 需手工 | 22 | 中文社区 LoRA（哩布/Civitai 为主），HF 上没有稳定直链 |
 
-自动解析覆盖了**跑通主线的全部必需项**：H3 三件套（unet/clip/vae/audio_vae）、官方 t2v/i2v/r2v、turbo 加速、换脸 LoRA、Qwen 2512/Edit-2509、Z-Image、Wan2.1、LTX VAE 与 text projection、gemma4。
+自动解析覆盖了**跑通主线的全部必需项**：H3 三件套（unet/clip/vae/audio_vae）、官方 t2v/i2v/r2v、turbo 加速、换脸 LoRA、Qwen 2512/Edit-2509、Z-Image、Wan2.1、LTX VAE 与 text projection、gemma4、**MiniMax Music 3 三件（配乐）**。
 
-需手工的 23 个（`models.py plan` 会列出来）主要是：`H3_Combat_V2`、`Motion_Repair`、`真实电影质感`、`MysticXXX`、`Kook_Qwen_*`、`AnythingtoRealCharacters`、`White_Marble AIO`、`Krea2`、`10Eros/Dasiwa` 等。它们大多是**风格/动作微调**，不是跑通必需——先跑主线，再按需补。
+需手工的 22 个（`models.py plan` 会列出来）主要是：`H3_Combat_V2`、`Motion_Repair`、`真实电影质感`、`MysticXXX`、`Kook_Qwen_*`、`AnythingtoRealCharacters`、`White_Marble AIO`、`Krea2`、`10Eros/Dasiwa` 等。它们大多是**风格/动作微调**，不是跑通必需——先跑主线，再按需补。
 
 ### 2.1 可选：r2v 口播 8 步 LoRA
 

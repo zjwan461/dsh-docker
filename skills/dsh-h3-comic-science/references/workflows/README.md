@@ -8,7 +8,8 @@
 workflows/
 ├── h3/       MiniMax H3（本 skill 主线）
 ├── image/    生图 / 编辑（静帧、三视图、洗图）
-└── video/    Wan / LTX / 对口型 / 声音克隆
+├── video/    Wan / LTX / 对口型 / 声音克隆
+└── audio/    独立音频产物（MiniMax Music 3 配乐）
 ```
 
 ### h3/
@@ -26,6 +27,7 @@ workflows/
 | `U24-文武双修T8版.json` | 混合底模 + LoRA 栈 + 两遍采样 |
 | `U30-三段采样与AV分离.json` | 三段采样 + AV latent 分离 + 3D 放大 |
 | `U32-Sigma精修与动作修复.json` | Sigma 精修 + Motion_Repair |
+| `U33-H3口播音频T8.json` | **H3 Speech Studio：音频-only 口播 → 独立 speech FLAC** |
 
 ### image/
 
@@ -49,6 +51,12 @@ workflows/
 | `Y08-LTX四宫格.json` | LTX 四宫格分镜 |
 | `J13-InfiniteTalk长口播.json` | 90 秒级长口播（分段续接） |
 | `N2-FishAudio声音克隆.json` | 参考音 → 克隆 TTS |
+
+### audio/
+
+| 文件 | 用途 |
+|---|---|
+| `M1-MiniMaxMusic3配乐.json` | **MiniMax Music 3 文本→配乐 → 独立 BGM FLAC** |
 
 > `h3_*_api.json` 是**官方模板的节点图**转成的 API 格式；`U*` / `A*` / `B*` / `C*` / `T*` / `G*` / `P*` / `H*` / `Y*` / `J*` / `N*` 是社区工作流原件（保留原节点与默认参数）。社区工作流依赖各自的自定义节点（T8 / Licon / KJ / rgthree / llama_cpp 等），缺节点时会报红——提交前先 `validate`。
 >
@@ -83,6 +91,8 @@ workflows/
 | 四宫格分镜预览 | `video/Y08-LTX四宫格.json` | 一屏四格 |
 | >15s 长口播要对嘴 | `video/J13-InfiniteTalk长口播.json` | 分段续接；三个固定目录 |
 | 克隆音色做 TTS（跨集同声） | `video/N2-FishAudio声音克隆.json` | 首次下 11GB s2-pro |
+| **可控音色口播/旁白、不出视频**（speech stem） | `h3/U33-H3口播音频T8.json` | T8 Speech Studio；情绪未校准、中文逐条听 |
+| **本地 AI 配乐、可反复换**（BGM stem） | `audio/M1-MiniMaxMusic3配乐.json` | Music3 三件权重 ~12GB；cfg1.5/40步 |
 
 **三条快速决策**：
 
@@ -90,6 +100,7 @@ workflows/
 要"对嘴/给定音频"？ → U11（短）/ J13（长）；音色先 N2 克隆
 要"锁多个角色/音色"？ → r2v / U22 / U06V9；要"精确续接构图"？ → i2v / G02
 只是要静帧/三视图/洗图？ → image/（A01/B13/C19/T4/A08），别烧视频 GPU
+要"独立 speech / 可换 BGM"？ → U33（speech stem）+ M1（BGM stem），后期混音
 ```
 
 > 换脸路线 B（Character Swap LoRA 严格跟原片）的工作流在 `references/character-swap-api.json`（不在本目录）；路线 E 用本目录 `E1`+`h3_i2v`。详见 `references/face-swap.md`。

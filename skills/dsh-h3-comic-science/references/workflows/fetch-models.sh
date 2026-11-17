@@ -148,6 +148,34 @@ if [ -f "$DEST" ]; then echo "skip  $DEST"; else
   curl -L --fail --retry 3 -C - --limit-rate "$RATE" -o "$DEST" 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_video_vae_fp16.safetensors?download=true' || echo "FAIL $DEST"
 fi
 
+DEST="$COMFY/models/vae/minimax_h3_video_vae_int8_convrot.safetensors"
+if [ -f "$DEST" ]; then echo "skip  $DEST"; else
+  echo "get   $DEST"
+  mkdir -p "$(dirname "$DEST")"
+  curl -L --fail --retry 3 -C - --limit-rate "$RATE" -o "$DEST" 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_video_vae_int8_convrot.safetensors?download=true' || echo "FAIL $DEST"
+fi
+
+DEST="$COMFY/models/vae/minimax_music3_dav.safetensors"
+if [ -f "$DEST" ]; then echo "skip  $DEST"; else
+  echo "get   $DEST"
+  mkdir -p "$(dirname "$DEST")"
+  curl -L --fail --retry 3 -C - --limit-rate "$RATE" -o "$DEST" 'https://huggingface.co/Comfy-Org/MiniMax-Music-3/resolve/main/vae/minimax_music3_dav.safetensors?download=true' || echo "FAIL $DEST"
+fi
+
+DEST="$COMFY/models/diffusion_models/minimax_music3_dit_int8_convrot.safetensors"
+if [ -f "$DEST" ]; then echo "skip  $DEST"; else
+  echo "get   $DEST"
+  mkdir -p "$(dirname "$DEST")"
+  curl -L --fail --retry 3 -C - --limit-rate "$RATE" -o "$DEST" 'https://huggingface.co/Comfy-Org/MiniMax-Music-3/resolve/main/diffusion_models/minimax_music3_dit_int8_convrot.safetensors?download=true' || echo "FAIL $DEST"
+fi
+
+DEST="$COMFY/models/text_encoders/minimax_music3_text_encoder_pruned_int8_convrot.safetensors"
+if [ -f "$DEST" ]; then echo "skip  $DEST"; else
+  echo "get   $DEST"
+  mkdir -p "$(dirname "$DEST")"
+  curl -L --fail --retry 3 -C - --limit-rate "$RATE" -o "$DEST" 'https://huggingface.co/Comfy-Org/MiniMax-Music-3/resolve/main/text_encoders/minimax_music3_text_encoder_pruned_int8_convrot.safetensors?download=true' || echo "FAIL $DEST"
+fi
+
 DEST="$COMFY/models/text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors"
 if [ -f "$DEST" ]; then echo "skip  $DEST"; else
   echo "get   $DEST"
@@ -167,6 +195,13 @@ if [ -f "$DEST" ]; then echo "skip  $DEST"; else
   echo "get   $DEST"
   mkdir -p "$(dirname "$DEST")"
   curl -L --fail --retry 3 -C - --limit-rate "$RATE" -o "$DEST" 'https://huggingface.co/Comfy-Org/HunyuanVideo_1.5_repackaged/resolve/main/split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors' || echo "FAIL $DEST"
+fi
+
+DEST="$COMFY/models/text_encoders/qwen_3_4b.safetensors"
+if [ -f "$DEST" ]; then echo "skip  $DEST"; else
+  echo "get   $DEST"
+  mkdir -p "$(dirname "$DEST")"
+  curl -L --fail --retry 3 -C - --limit-rate "$RATE" -o "$DEST" 'https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/text_encoders/qwen_3_4b.safetensors?download=true' || echo "FAIL $DEST"
 fi
 
 DEST="$COMFY/models/diffusion_models/qwen/qwen_image_2512_fp8_e4m3fn.safetensors"

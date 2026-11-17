@@ -146,6 +146,18 @@
     "z_image_turbo_int8_convrot.safetensors": {
       "repo": "Comfy-Org/z_image_turbo",
       "path": "split_files/diffusion_models/z_image_turbo_int8_convrot.safetensors"
+    },
+    "minimax_music3_dit_int8_convrot.safetensors": {
+      "repo": "Comfy-Org/MiniMax-Music-3",
+      "path": "diffusion_models/minimax_music3_dit_int8_convrot.safetensors"
+    },
+    "minimax_music3_text_encoder_pruned_int8_convrot.safetensors": {
+      "repo": "Comfy-Org/MiniMax-Music-3",
+      "path": "text_encoders/minimax_music3_text_encoder_pruned_int8_convrot.safetensors"
+    },
+    "minimax_music3_dav.safetensors": {
+      "repo": "Comfy-Org/MiniMax-Music-3",
+      "path": "vae/minimax_music3_dav.safetensors"
     }
   },
   "candidates": [

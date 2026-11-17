@@ -6,9 +6,10 @@
 
 | 目录 | 内容 |
 |---|---|
-| `workflows/h3/` | 官方三套 API（t2v/i2v/r2v）+ U00/U06V9/U11/U17/U22/U24/U30/U32 |
-| `workflows/image/` | A01/A08/B13/C19/T4 |
+| `workflows/h3/` | 官方三套 API（t2v/i2v/r2v）+ U00/U06V9/U11/U17/U22/U24/U30/U32/U33 |
+| `workflows/image/` | A01/A08/A08b/B13/C19/T4/E1 |
 | `workflows/video/` | G02/P02/H41/Y08/J13/N2 |
+| `workflows/audio/` | M1（MiniMax Music 3 配乐，独立 BGM FLAC） |
 
 > 命名规律：A/B/C/D/T=生图与编辑，G/P=Wan 系视频与动作迁移，H/J/Y=LTX 系视频，U=H3 系视频，N=声音克隆。
 > 下表给的是**代码**，对应文件在 `workflows/<类别>/<代码>-<名字>.json`。
@@ -69,16 +70,18 @@
 | U11 图片+音频对口型 | **给定音频驱动口型**（配音/口播） | `DenoMiniMaxH3ReferenceToVideo` + `DenoAudioTranscript` + `TextGenerate` + turbo 4step |
 | U30 | 三段采样 + AV latent 分离 + 3D latent 放大 | `SplitSigmas` + `LTXVSeparateAVLatent` + `MinimaxH3LatentUpscaler3D` |
 | U32 | Sigma 精修 + 动作修复 | `H3SigmaRefiner` + `Motion_Repair` + `MiniMaxH3AVDecodeT8` |
+| U33 | **H3 Speech Studio：音频-only 口播 → 独立 speech FLAC** | `VoiceProfileT8`+`SpeechPlanT8`+`SpeechStudioT8`+`SpeechDecodeT8`；见 `audio-assets.md` |
 
 ## 5. 声音
 
 | 文件 | 解决什么 | 关键点 |
 |---|---|---|
 | N2 单人声音克隆 FishAudio S2 pro | **克隆音色做 TTS**（跨集同声） | `Apply Whisper`（转写参考音频）+ `FishS2VoiceCloneTTS` |
+| M1 MiniMax Music 3 配乐 | **文本→配乐 → 独立 BGM FLAC**（可反复换音乐） | `MiniMaxMusic3TextEncode`+`EmptyMiniMaxMusic3LatentAudio`+KSampler(cfg1.5/40步)；见 `audio-assets.md` |
 
 ---
 
-## 6. 怎么选（对我们三类产线）
+## 6. 怎么选（对我们四类产线）
 
 | 需求 | 首选 | 备选 |
 |---|---|---|
@@ -87,6 +90,8 @@
 | 静帧高清放大 | A01（SeedVR2） | C18 三采 |
 | 对白/口播口型 | **U11（H3 图+音对口型）** | J13（InfiniteTalk 长片） |
 | 跨集同音色 | **N2（FishAudio 克隆）** | 参考音频（H3 r2v） |
+| 可控音色口播/旁白、不出视频 | **U33（H3 Speech Studio，speech stem）** | N2 克隆 + U11 |
+| 本地 AI 配乐、保留对白换音乐 | **M1（Music 3，BGM stem）** | 外部版权音乐 + finish.py --music |
 | 动作迁移/真人驱动 | P02/P07（Wan Animate） | H41（LTX MSR 多参考） |
 | 音视频一体/高动态 | H17/H28（LTX 2.3） | 我们的 U24 |
 | 长片连续 | Hub/Chain（我们用 H3） | G02（Wan 首尾帧） |

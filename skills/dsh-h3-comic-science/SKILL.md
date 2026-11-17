@@ -1,6 +1,6 @@
 ---
 name: dsh-h3-comic-science
-description: 用 MiniMax H3 做四类平台爆款——**AI 漫剧**、**AI 短剧**（红果/抖音，80 集竖屏连续剧）、**AI 换脸/重演**（rapper swap、世界巡演）、**外星人科普**，也能脱离插件直连 ComfyUI 跑任意工作流。含**决策入口**（对白镜还是插入镜、口播走 i2v 还是 r2v、用不用 H3）、**H3 官方语法**（三段/六段、`<d>` 台词、`(S1)` 说话人、17k+5 帧、cfg=1 无负面词）、**通用镜头工艺**（多人站位与闭嘴锁、因果式运镜、八种转场、武打六拍、Hub/Chain 长片连续性、换脸、T8 管线）、**四条产线**（漫剧 / 短剧 / 换脸重演 / 科普）、**声音**（口播为主 i2v/r2v、克隆+对口型、旁白仅补、BGM 无分轨与闪避、字幕路线）、**导演风格**（七轴 DNA→H3 字段）、**后期质检**（finish/qa/seam）与 **LoRA 目录**。附 24 套随包 API 工作流、`fetch-models.sh` 权重下载脚本与纯标准库客户端 `comfy.py`。用户要做漫剧/科普/分镜/换脸/口播/长片，或在 ComfyUI 上跑 H3、Wan、LTX、Qwen 生图时加载。
+description: 用 MiniMax H3 做四类平台爆款——**AI 漫剧**、**AI 短剧**（红果/抖音，80 集竖屏连续剧）、**AI 换脸/重演**（rapper swap、世界巡演）、**外星人科普**，也能脱离插件直连 ComfyUI 跑任意工作流。含**决策入口**（对白镜还是插入镜、口播走 i2v 还是 r2v、用不用 H3）、**H3 官方语法**（三段/六段、`<d>` 台词、`(S1)` 说话人、17k+5 帧、cfg=1 无负面词）、**通用镜头工艺**（多人站位与闭嘴锁、因果式运镜、八种转场、武打六拍、Hub/Chain 长片连续性、换脸、T8 管线）、**四条产线**（漫剧 / 短剧 / 换脸重演 / 科普）、**声音**（口播为主 i2v/r2v、克隆+对口型、旁白仅补、BGM 无分轨与闪避、字幕路线）、**导演风格**（七轴 DNA→H3 字段）、**后期质检**（finish/qa/seam）与 **LoRA 目录**。附 26 套随包 API 工作流、`fetch-models.sh` 权重下载脚本与纯标准库客户端 `comfy.py`。用户要做漫剧/科普/分镜/换脸/口播/长片，或在 ComfyUI 上跑 H3、Wan、LTX、Qwen 生图时加载。
 whenToUse: 用户要做 AI 漫剧、动态漫、竖屏短剧；要做红果/抖音类 AI 短剧（80 集、90–120 秒一集、付费卡点、断章）；要做 AI 换脸/重演（演唱会换脸、rapper swap、影视片段换人）；要做"外星人给地球人讲知识"这类双人对话科普；要做口播数字人、亲情向、动作迁移、歌词 MV、四宫格分镜；要写分镜、台词、站位、运镜、转场、打戏；要模仿某位导演的视觉风格（王家卫/韦斯·安德森/诺兰/维伦纽瓦/张艺谋等作者电影感）；要决定静态漫还是动态漫、原生口播还是 TTS；要做换脸/人物替换；要跑 T8/U22/U24、Wan 首尾帧、LTX MSR 等高级工作流；要脱离插件直连 ComfyUI 提交任务、查状态、取成品；要排查画风漂移、口型错人、声线不分、台词被截、字幕自现、打斗发软、成片削波。
 metadata:
   version: 2
@@ -289,13 +289,14 @@ cfg=1，没有负面分支。`no subtitles / no text / not photorealistic` 会**
 
 ### 5.2 BGM
 
-**H3 输出一条混好的音轨，没有 stems**——"保留对白只换音乐"做不到；而且它会自己加音乐（省略 `non_diegetic_music` 就补）。
+**视频 baked 音轨是一条混音**（无法事后分离），且 H3 会自己加音乐（省略 `non_diegetic_music` 就补）。**但分轨可以独立生成**：speech 用 H3 T8 Speech Studio（U33）、BGM 用 MiniMax Music 3（M1），两者是独立 FLAC，后期可"保留对白只换音乐"。见 `references/audio-assets.md`。
 
-- 多镜 >15s：**外挂独立音乐轨**（5–15s 出不来音乐弧线）。
+- 多镜 >15s：**外挂独立音乐轨**（5–15s 出不来音乐弧线）；本地 AI 配乐用 **Music 3（M1）**，可反复换。
 - 要它别出音乐：显式 `non_diegetic_music: N/A`。
+- 口播/旁白**不出视频**时用 **U33 speech stem**（H3 Speech Studio），与 BGM 独立混音。
 - 后期顺序：先 −16 LUFS → 再铺音乐 → 最后限幅；音乐比对白低 12–18dB，用 sidechain 闪避。
 
-详见 `references/bgm.md`。
+详见 `references/bgm.md` 与 `references/audio-assets.md`。
 
 ### 5.3 字幕
 
@@ -370,17 +371,17 @@ LoRA 用法与强度见 `references/lora-catalog.md`。
 
 **产线**：`references/manju-playbook.md`（漫剧）/ `references/short-drama.md`（红果短剧）/ `references/science-playbook.md`（科普）/ `references/face-swap.md`（换脸）/ `references/image-pipelines.md` / `references/templates.md`
 
-**功能**：`references/t8-pipelines.md` / `references/native-dialogue.md` / `references/talking-head.md` / `references/bgm.md` / `references/subtitles.md`
+**功能**：`references/t8-pipelines.md` / `references/native-dialogue.md` / `references/talking-head.md` / `references/bgm.md` / `references/subtitles.md` / `references/audio-assets.md`（独立 speech/BGM 产物）
 
-**生态**：`references/workflow-catalog.md`（35 套编目，其中 24 套随包）/ `references/alt-video-models.md`（Wan/LTX）/ `references/lora-catalog.md`
+**生态**：`references/workflow-catalog.md`（35 套编目，其中 26 套随包）/ `references/alt-video-models.md`（Wan/LTX）/ `references/lora-catalog.md`
 
-**模型权重**：`references/models.md`（54 个依赖、31 个可自动下载、`workflows/fetch-models.sh`、校验与许可）
+**模型权重**：`references/models.md`（58 个依赖、36 个可自动下载、`workflows/fetch-models.sh`、校验与许可）
 
 **交付**：`references/delivery-and-qa.md` / `references/validation.md`（实测记录）
 
 **脚本**：`comfy.py`（直连）/ `scaffold.py` / `check.py` / `finish.py` / `qa.py` / `seam.py`
 
-**工作流**：`references/workflows/h3|image|video/`（24 套，API 格式，见该目录 README）
+**工作流**：`references/workflows/h3|image|video|audio/`（26 套，API 格式，见该目录 README）
 
 ---
 

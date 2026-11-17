@@ -1,0 +1,13 @@
+{
+  "_comment": "MiniMax Music 3 文本→配乐，输出独立 BGM FLAC。改 4.caption（乐器+演奏法+空间+录音质感+情绪）与 8.filename_prefix；时长由 caption/seconds 决定。需 Music3 三件权重（见 references/audio-assets.md §3.3）与 Music3 节点。cfg=1.5、40 步 euler/simple。",
+  "prompt": {
+    "1": {"class_type": "UNETLoader", "inputs": {"unet_name": "minimax_music3_dit_int8_convrot.safetensors", "weight_dtype": "default"}},
+    "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": "minimax_music3_text_encoder_pruned_int8_convrot.safetensors", "type": "minimax", "device": "default"}},
+    "3": {"class_type": "VAELoader", "inputs": {"vae_name": "minimax_music3_dav.safetensors"}},
+    "4": {"class_type": "MiniMaxMusic3TextEncode", "inputs": {"clip": ["2", 0], "caption": "dark ambient score for a historical horror film, ancient Chinese instruments recorded in a large empty stone hall: a single guqin harmonic struck and left to decay, a low xun clay ocarina drone, a bowed bronze bell tone, distant sub-bass rumble, tape hiss and room reverb, extremely sparse and slow, no melody, no rhythm section, no drums, cold and patient, tension held without release", "lyrics": "", "seed": 20261117, "max_duration": 12.0, "cfg_scale": 1.5, "top_k": 50}},
+    "5": {"class_type": "EmptyMiniMaxMusic3LatentAudio", "inputs": {"seconds": ["4", 1], "batch_size": 1}},
+    "6": {"class_type": "KSampler", "inputs": {"seed": 20261117, "steps": 40, "cfg": 1.5, "sampler_name": "euler", "scheduler": "simple", "denoise": 1.0, "model": ["1", 0], "positive": ["4", 0], "negative": ["4", 0], "latent_image": ["5", 0]}},
+    "7": {"class_type": "VAEDecodeAudio", "inputs": {"samples": ["6", 0], "vae": ["3", 0]}},
+    "8": {"class_type": "SaveAudio", "inputs": {"audio": ["7", 0], "filename_prefix": "audio/m3_bgm"}}
+  }
+}

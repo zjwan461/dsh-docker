@@ -1,0 +1,14 @@
+{
+  "_comment": "H3 Speech Studio（T8）音频-only 口播：复用 H3 视频权重，在小画布上只解码音频，输出独立 speech FLAC。改 5.voice_description / 6.text / 6.acting_direction / 7.render_seconds / 9.filename_prefix。需 T8 插件节点。边界见 references/audio-assets.md §2.3（情绪未校准、中文需逐条听、reference 需裁边、16G 显存不安全）。",
+  "prompt": {
+    "1": {"class_type": "UNETLoader", "inputs": {"unet_name": "minimax/minimax_h3_fl2va_pruned_int8_convrot.safetensors", "weight_dtype": "default"}},
+    "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": "qwen3vl_32b_minimax_h3_int8_convrot.safetensors", "type": "minimax", "device": "default"}},
+    "3": {"class_type": "VAELoader", "inputs": {"vae_name": "minimax_h3_video_vae_fp16.safetensors"}},
+    "4": {"class_type": "VAELoader", "inputs": {"vae_name": "minimax_h3_audio_vae_fp32.safetensors"}},
+    "5": {"class_type": "MiniMaxH3VoiceProfileT8", "inputs": {"voice_mode": "described_voice", "speaker_id": "narr_v1", "voice_description": "a Chinese man in his forties, low and slightly dry voice, restrained and measured, almost no emotion, speaking slowly and evenly as if reading a ledger aloud", "language": "Chinese", "rights_confirmed": true, "reference_start_seconds": 0.0, "reference_duration_seconds": 0.0, "highpass_60hz": true, "peak_limit_minus_3_dbfs": true}},
+    "6": {"class_type": "MiniMaxH3SpeechPlanT8", "inputs": {"voice_profile": ["5", 0], "text": "二十八年，六个皇帝。", "language": "Chinese", "acting_direction": "slow, level, uninflected delivery; place each clause and stop", "emotion": "calm", "emotion_intensity": 0.15, "space": "studio", "chunking": "single_segment", "target_units": 10, "max_units": 14}},
+    "7": {"class_type": "MiniMaxH3SpeechStudioT8", "inputs": {"model": ["1", 0], "clip": ["2", 0], "video_vae": ["3", 0], "audio_vae": ["4", 0], "voice_profile": ["5", 0], "speech_plan": ["6", 0], "segment_index": 0, "seed": 9100, "render_seconds": 5.2, "resolution": 128, "steps": 20, "sampler_name": "res_multistep", "scheduler": "simple", "shift_video": 12.0, "shift_audio": 3.0, "trim_mode": "conservative_energy", "verify_mode": "off", "asr_model_directory": "", "asr_language": "Chinese", "min_similarity": 0.85, "unload_asr_after_verify": true, "speaker_check_mode": "off", "speaker_model_directory": "", "min_speaker_similarity": 0.86, "unload_speaker_after_verify": true, "peak_limit_dbfs": -1.0, "release_policy": "unload_all_models"}},
+    "8": {"class_type": "MiniMaxH3SpeechDecodeT8", "inputs": {"av_latent": ["7", 3], "audio_vae": ["4", 0], "trim_mode": "conservative_energy", "energy_threshold_dbfs": -50.0, "trim_padding_seconds": 0.08}},
+    "9": {"class_type": "SaveAudio", "inputs": {"audio": ["8", 0], "filename_prefix": "audio/t8_speech"}}
+  }
+}
