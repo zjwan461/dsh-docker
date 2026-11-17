@@ -63,6 +63,10 @@
 编辑（Qwen-Image-Edit-2509 fp8，20 步，~80s）→ i2v（73f/3.04s/864×480，~4min）：外星人进原布景，呼吸/转头/印记发光，身份稳定。
 坑：音频解码必须 `VAEDecodeAudio`；上传文件名带序号；模型没下完会在 UNETLoader 报 "extends past end of file"。详见 `face-swap.md` §12.7。
 
+## 6.7 独立音频产物（发现自服务器真实历史，模板待跑）
+
+服务器任务历史里存在 `*_speech_*.flac` 与 `*_bgm_*.flac`：speech 由 **H3 T8 SpeechStudio**（音频-only，小画布只解码音频）产出，BGM 由 **MiniMax Music 3** 产出。据此新增 `U33`/`M1` 工作流与 `audio-assets.md`，**validate 通过**；但本 skill 模板尚未实际提交（服务器忙）。情绪/语速为未校准方向提示、中文需逐条听等边界见 `audio-assets.md` §2.3。
+
 ## 7. 换脸（Character Swap LoRA）
 
 - 三个 LoRA（character_swap v1.1 / head_swap v1.0 / preprocessor_map）**装好即被识别**，无需重启。
@@ -90,3 +94,4 @@
 - T8 U22/U24 的实际效果（服务器忙，未提交）
 - Wan / LTX 替代路线（未跑）
 - 定稿档（0.7–1.0MP、20–25步）的绝对值（以上全是 0.4MP 打样档）
+- U33 speech stem / M1 Music3 BGM 的本模板实跑（validate 通过；节点图源自服务器真实历史）
