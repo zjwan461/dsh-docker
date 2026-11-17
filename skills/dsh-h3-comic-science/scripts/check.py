@@ -90,6 +90,17 @@ def main():
         if len(refs) > 9:
             errors.append("%s: refs %d 张，上限 9" % (sid, len(refs)))
 
+        # 口播驱动：对白镜必须动态；audio 字段合法
+        audio = (s.get("audio") or "").strip()
+        if audio and audio not in ("dialogue", "narration", "silent"):
+            errors.append("%s: audio=%r 未知（应为 dialogue/narration/silent）" % (sid, audio))
+        if line and mode == "static":
+            errors.append("%s: 有台词却 mode=static（对白镜应 i2v/r2v 口播；static 只用于无声插入镜）" % sid)
+        if audio == "dialogue" and mode == "static":
+            errors.append("%s: audio=dialogue 却 mode=static" % sid)
+        if audio == "silent" and line:
+            warns.append("%s: audio=silent 却写了台词" % sid)
+
         # 提示词结构
         if mode != "static":
             if not prompt:

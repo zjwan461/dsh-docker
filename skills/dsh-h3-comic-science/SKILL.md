@@ -1,6 +1,6 @@
 ---
 name: dsh-h3-comic-science
-description: 用 MiniMax H3 做四类平台爆款——**AI 漫剧**、**AI 短剧**（红果/抖音，80 集竖屏连续剧）、**AI 换脸/重演**（rapper swap、世界巡演）、**外星人科普**，也能脱离插件直连 ComfyUI 跑任意工作流。含**决策入口**（静态还是动态、原生口播还是 TTS、用不用 H3）、**H3 官方语法**（三段/六段、`<d>` 台词、`(S1)` 说话人、17k+5 帧、cfg=1 无负面词）、**通用镜头工艺**（多人站位与闭嘴锁、因果式运镜、八种转场、武打六拍、Hub/Chain 长片连续性、换脸、T8 管线）、**三条产线**（漫剧 / 换脸重演 / 科普）、**声音**（原生口播情绪、TTS 分工、FishAudio 克隆、对口型、BGM 无分轨与闪避、字幕路线）、**后期质检**（finish/qa/seam）与 **LoRA 目录**。附 23 套随包 API 工作流、`fetch-models.sh` 权重下载脚本与纯标准库客户端 `comfy.py`。用户要做漫剧/科普/分镜/换脸/口播/长片，或在 ComfyUI 上跑 H3、Wan、LTX、Qwen 生图时加载。
+description: 用 MiniMax H3 做四类平台爆款——**AI 漫剧**、**AI 短剧**（红果/抖音，80 集竖屏连续剧）、**AI 换脸/重演**（rapper swap、世界巡演）、**外星人科普**，也能脱离插件直连 ComfyUI 跑任意工作流。含**决策入口**（对白镜还是插入镜、口播走 i2v 还是 r2v、用不用 H3）、**H3 官方语法**（三段/六段、`<d>` 台词、`(S1)` 说话人、17k+5 帧、cfg=1 无负面词）、**通用镜头工艺**（多人站位与闭嘴锁、因果式运镜、八种转场、武打六拍、Hub/Chain 长片连续性、换脸、T8 管线）、**四条产线**（漫剧 / 短剧 / 换脸重演 / 科普）、**声音**（口播为主 i2v/r2v、克隆+对口型、旁白仅补、BGM 无分轨与闪避、字幕路线）、**导演风格**（七轴 DNA→H3 字段）、**后期质检**（finish/qa/seam）与 **LoRA 目录**。附 24 套随包 API 工作流、`fetch-models.sh` 权重下载脚本与纯标准库客户端 `comfy.py`。用户要做漫剧/科普/分镜/换脸/口播/长片，或在 ComfyUI 上跑 H3、Wan、LTX、Qwen 生图时加载。
 whenToUse: 用户要做 AI 漫剧、动态漫、竖屏短剧；要做红果/抖音类 AI 短剧（80 集、90–120 秒一集、付费卡点、断章）；要做 AI 换脸/重演（演唱会换脸、rapper swap、影视片段换人）；要做"外星人给地球人讲知识"这类双人对话科普；要做口播数字人、亲情向、动作迁移、歌词 MV、四宫格分镜；要写分镜、台词、站位、运镜、转场、打戏；要模仿某位导演的视觉风格（王家卫/韦斯·安德森/诺兰/维伦纽瓦/张艺谋等作者电影感）；要决定静态漫还是动态漫、原生口播还是 TTS；要做换脸/人物替换；要跑 T8/U22/U24、Wan 首尾帧、LTX MSR 等高级工作流；要脱离插件直连 ComfyUI 提交任务、查状态、取成品；要排查画风漂移、口型错人、声线不分、台词被截、字幕自现、打斗发软、成片削波。
 metadata:
   version: 2
@@ -324,6 +324,8 @@ python scripts/finish.py --out final.mp4 --clips clips/*.mp4 \
 
 交付规范（安全区、封面尺寸、合规）见 `references/delivery-and-qa.md`。
 
+**与 `motion-showreel` 分工**：图形/文字/片头/数据动效/讲解包装交给兄弟 skill `motion-showreel`（代码渲染 `render(t)`→ffmpeg，40 风格库、最长 20min）；H3 负责人物/写实/二次元画面。可组合：H3 出绿幕人物 + motion-showreel 做场景/大字/动效。字卡/歌词走代码渲染比 H3 原生更可控（H3 文字不可靠）。
+
 ---
 
 ## 7. 成本与吞吐
@@ -370,7 +372,7 @@ LoRA 用法与强度见 `references/lora-catalog.md`。
 
 **功能**：`references/t8-pipelines.md` / `references/native-dialogue.md` / `references/talking-head.md` / `references/bgm.md` / `references/subtitles.md`
 
-**生态**：`references/workflow-catalog.md`（35 套编目，其中 23 套随包）/ `references/alt-video-models.md`（Wan/LTX）/ `references/lora-catalog.md`
+**生态**：`references/workflow-catalog.md`（35 套编目，其中 24 套随包）/ `references/alt-video-models.md`（Wan/LTX）/ `references/lora-catalog.md`
 
 **模型权重**：`references/models.md`（54 个依赖、31 个可自动下载、`workflows/fetch-models.sh`、校验与许可）
 
@@ -378,7 +380,7 @@ LoRA 用法与强度见 `references/lora-catalog.md`。
 
 **脚本**：`comfy.py`（直连）/ `scaffold.py` / `check.py` / `finish.py` / `qa.py` / `seam.py`
 
-**工作流**：`references/workflows/h3|image|video/`（23 套，API 格式，见该目录 README）
+**工作流**：`references/workflows/h3|image|video/`（24 套，API 格式，见该目录 README）
 
 ---
 

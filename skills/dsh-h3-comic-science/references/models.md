@@ -41,6 +41,19 @@ python scripts/models.py scan     # 54 个依赖文件，含"被哪个工作流�
 
 需手工的 23 个（`models.py plan` 会列出来）主要是：`H3_Combat_V2`、`Motion_Repair`、`真实电影质感`、`MysticXXX`、`Kook_Qwen_*`、`AnythingtoRealCharacters`、`White_Marble AIO`、`Krea2`、`10Eros/Dasiwa` 等。它们大多是**风格/动作微调**，不是跑通必需——先跑主线，再按需补。
 
+### 2.1 可选：r2v 口播 8 步 LoRA
+
+做 **r2v 带台词**（口播/对口型）需要 8 步 r2v turbo，它不在 54 个扫描依赖里（没有随包工作流引用），手动下：
+
+```bash
+cd /path/to/ComfyUI/models/loras
+curl -L --fail --retry 3 -C - --limit-rate 20M \
+  -o minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors \
+  'https://huggingface.co/lightx2v/Minimax-h3-Turbo/resolve/main/minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors?download=true'
+```
+
+无台词的 r2v 才用 4 步（`ref2v_turbo_4step_v0.1`，已在自动解析里）。
+
 ---
 
 ## 3. 来源表怎么维护

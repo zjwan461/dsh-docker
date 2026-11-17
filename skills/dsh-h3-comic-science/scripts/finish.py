@@ -231,7 +231,12 @@ def main():
 
     clips = []
     for c in args.clips:
-        clips.extend(sorted(glob.glob(c)) if ("*" in c or "?" in c) else [c])
+        # 兼容逗号分隔（episode-pipeline.md 的写法）与空格分隔、通配符
+        for part in c.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            clips.extend(sorted(glob.glob(part)) if ("*" in part or "?" in part) else [part])
     if not clips:
         print("没有可用片段")
         return 2

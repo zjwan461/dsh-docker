@@ -10,7 +10,8 @@ H3 的 LoRA 分四类：**加速**、**风格**、**功能**、**动作/修复**
 |---|---|---|---|---|
 | **t2v/i2v 加速** | `minimax/minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16` | 1.0 | 8 | 通用加速，最稳 |
 | t2v 768p 加速 | `minimax/minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16` | 1.0 | 4 | 更快，细节掉 |
-| **r2v 加速** | `minimax/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16` | 1.0 | 4 | r2v 专用，别混用 |
+| **r2v 加速** | `minimax/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16` | 1.0 | 4 | r2v 专用，别混用；**无台词**才用 |
+| **r2v 口播加速** | `minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16`（lightx2v/Minimax-h3-Turbo） | 1.0 | 8 | **r2v 带台词**用这个；4 步中文会糊 |
 | **写实质感（文）** | `minimax/MinimaxH3真实电影质感V0.1` | 0.5（打样 0.2） | — | 科普线用；二维漫剧**别用**（会拉回实拍） |
 | **打斗（武）** | `minimax/H3_Combat_V2` | 0.5–0.7 | — | 改动作分布，先小强度试 |
 | 动作稳定 | `minimax/Motion_Repair` | 0.2–0.7 | — | 治"打斗软/漂"，双遍可分强度 |
