@@ -56,6 +56,46 @@ workflows/
 >
 > **三套有"跑之前先看一眼"的前置条件**：`E1` 的场景参考图必须空棚（带人会出两个人）；`J13` 的三个加载器各认一个固定目录（`audio_encoders` / `model_patches` / `diffusion_models`）；`N2` 首次跑要自己下 11GB 的 `s2-pro`。细节见 `references/talking-head.md` 与 `references/face-swap.md` §12。
 
+## 场景 → 工作流 速查
+
+**先按场景挑，再看上面各表的"用途/前置"。** 口播不绑定 i2v：锁人锁声用 r2v，精确续接构图用 i2v（`manju-playbook.md` §5.5）。
+
+| 场景 | 用哪个 | 备注 / 前置 |
+|---|---|---|
+| 无参考文生视频（空镜/概念/打样） | `h3/h3_t2v_api.json` | 最简；画风靠提示词重申 |
+| 已有设计好的起始帧，要精确开场/续接 | `h3/h3_i2v_api.json` | 钉首帧；Hub 锚点/动作接动作 |
+| 跨镜锁身份/锁音色、多参考、**原生口播** | `h3/h3_r2v_api.json` | 不钉首帧；脸板+造型板+场景；台词 8 步 |
+| 让本地 LLM 看多图自动写 H3 提示词 | `h3/U00-提示词LLM扩写.json` | 需 llama_cpp 节点 |
+| 满参考顶配（9 图 + 3 音） | `h3/U06V9-9图3音.json` | T8；多角色多音色 |
+| **给定音频对口型**（配音/口播/歌） | `h3/U11-图音对口型.json` | r2v+ref_audios；已验证 |
+| 加参考视频做运动参考 | `h3/U17-9图1视频3音频.json` | 运动迁移 |
+| 多角色 + 多音色（T8） | `h3/U22-9图3音.json` | 治跨镜变脸/变声 |
+| 对白 + 打戏 + 两遍高清（T8 文武） | `h3/U24-文武双修T8版.json` | 混合底模+LoRA 栈 |
+| 三段采样 + AV 分离 + 3D 放大 | `h3/U30-三段采样与AV分离.json` | 高清精修 |
+| 打斗发软/漂 → Sigma 精修+动作修复 | `h3/U32-Sigma精修与动作修复.json` | Motion_Repair |
+| 文生静帧 + 放大（锚点/场景/封面） | `image/A01-Qwen2512文生图放大.json` | Lightning 4step+SeedVR2 |
+| 动漫脸转写实（洗图） | `image/A08-二次元转真人.json` / `image/A08b-Krea2二次元转真人.json` | A08b 更快（~20s/2048） |
+| 角色三视图 / 多机位 | `image/B13-角色多角度.json` / `image/C19-三视图zimage双采.json` / `image/T4-Krea2三视图.json` | B13 多角度并行；C19 双采；T4 Krea2 |
+| **换脸路线 E**：人像+原布景→新首帧 | `image/E1-首帧重建-Qwen编辑.json` | 场景图必须空棚；接 h3_i2v |
+| 承接上一镜 / 必须落到某构图 | `video/G02-Wan首尾帧.json` | 首尾帧硬约束 |
+| 真人动作搬到角色 | `video/P02-WanAnimate动作迁移.json` | 全身+干净背景 |
+| 2–5 主体同时保身份 | `video/H41-LTX-MSR多参考.json` | LTX MSR |
+| 四宫格分镜预览 | `video/Y08-LTX四宫格.json` | 一屏四格 |
+| >15s 长口播要对嘴 | `video/J13-InfiniteTalk长口播.json` | 分段续接；三个固定目录 |
+| 克隆音色做 TTS（跨集同声） | `video/N2-FishAudio声音克隆.json` | 首次下 11GB s2-pro |
+
+**三条快速决策**：
+
+```
+要"对嘴/给定音频"？ → U11（短）/ J13（长）；音色先 N2 克隆
+要"锁多个角色/音色"？ → r2v / U22 / U06V9；要"精确续接构图"？ → i2v / G02
+只是要静帧/三视图/洗图？ → image/（A01/B13/C19/T4/A08），别烧视频 GPU
+```
+
+> 换脸路线 B（Character Swap LoRA 严格跟原片）的工作流在 `references/character-swap-api.json`（不在本目录）；路线 E 用本目录 `E1`+`h3_i2v`。详见 `references/face-swap.md`。
+> 图形/字卡/片头/数据动效不走这里，走兄弟 skill `motion-showreel`。
+> 能力级选型（含未随包的 35 套编目）见 `references/workflow-catalog.md` §6。
+
 ## 用法
 
 ```bash
