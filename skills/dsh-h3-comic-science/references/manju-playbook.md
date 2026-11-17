@@ -116,11 +116,12 @@
 
 | 路线 | 用在 | 说明 |
 |---|---|---|
-| **原生口播**（主） | 情绪对白、吵架、哭戏、发狠 | H3 i2v/r2v 带 `<d>` 台词，8 步；情绪由模型表演 |
-| **克隆 + 对口型**（主） | 跨集同音色、给定配音、长对白 | FishAudio 克隆 → U11 对口型；口型随音频 |
+| **原生口播**（主） | 情绪对白、吵架、哭戏、发狠 | H3 **i2v 或 r2v** 带 `<d>` 台词，8 步；情绪由模型表演 |
+| **克隆 + 对口型**（主） | 跨集同音色、给定配音、长对白 | FishAudio 克隆 → **r2v + ref_audios**（U11）对口型；口型随音频 |
 | **旁白 TTS**（补） | 画外补充、数字/术语、过渡、时间省略 | 只占少量时长；不替代对白 |
 
 > 不要把整集做成"旁白念稿 + 画面配图"。那是解说视频，不是漫剧。**对白承担叙事，旁白只补对白说不清的信息。**
+> **口播不绑定 i2v**：r2v 同样支持 `<d>` 台词，且能挂多参考图锁身份、挂 ref_audios 锁音色/对口型。见 §5.5。
 
 ### 5.2 字数预算
 
@@ -145,9 +146,30 @@
 
 全片一条房间底噪保声音连续；对白在单条内说完；BGM 外挂、比对口低 12–18dB、sidechain 闪避（`bgm.md`）。
 
+### 5.5 口播走 i2v 还是 r2v？
+
+**两条都通，按"要不要钉首帧 / 要不要挂参考"选：**
+
+| | i2v | r2v |
+|---|---|---|
+| 开场构图 | **钉死**首帧（构图/姿态/光位） | 模型自组开场，参考只引导 |
+| 身份锁定 | 单图（首帧兼身份） | **多参考**：脸板+造型板+场景，跨镜更稳 |
+| 参考音频 | ❌（只有 first_frame） | ✅ `ref_audios`：锁音色 / **给定音频对口型** |
+| 参考视频 | ❌ | ✅（运动迁移/换脸 guide） |
+| 台词 `<d>`+`(S1)`+闭嘴锁 | ✅ | ✅ |
+| 适合 | 已有设计好的起始帧、Hub 锚点续接、动作接动作 | 跨镜锁脸锁音色、克隆+对口型、不需精确开场 |
+
+- **克隆+对口型必须 r2v**（i2v 接不了参考音频）；U11 就是 r2v。
+- **原生情绪口播**两者皆可；要跨镜保脸/保音色就用 r2v 加脸板/音色 clip。
+- 步数：有台词 8 步。i2v 用 `fl2v_turbo_8step`；r2v 用 `ref2v_turbo_8step_768p`（lightx2v 有）。
+- **坑**：r2v 的 `ref_audios` 携带**完整音频 latent（含内容）**，可能泄漏参考录音自己的词（`native-dialogue.md` §5）。对口型时这正是想要的；只锁音色时用短而干净的音色 clip，情绪仍靠表演短语。
+- **坑**：`h3_generate` 插件不暴露 ref_audios/ref_video；**直连 API（comfy.py + r2v 工作流）才有**。文档里"本插件不支持参考音频"仅指插件。
+
 ---
 
-## 6. 动态镜：i2v 的正确写法
+## 6. 动态镜：i2v / r2v 的正确写法
+
+### 6.1 i2v（钉首帧）
 
 首帧是硬约束，提示词**只写运动与表演**，不重述画面：
 
@@ -164,6 +186,27 @@ non_diegetic_music: N/A
 1. **不要写两个大动作**（既转头又抬手）——模型只挑一个。
 2. **不要写"保持连续"**——写具体终点状态。
 3. **不要写负面词**——写"他在做什么"。
+
+### 6.2 r2v（多参考锁人 + 台词 / 对口型）
+
+不钉首帧，用脸板+造型板锁身份；台词同样 `<d>`。要对口型就把给定音频挂 `ref_audios.ref_audio_0` 并在提示词用 `<Audio 1>` 绑定（U11 路线）。
+
+```text
+subject_definitions: <Subject 1> is the young man in <Picture 1> (face board) and <Picture 2> (full-body board): short buzz cut, black square-framed glasses, grey hoodie. <Picture 3> is the rainy alley at night.
+
+summary: [reference generation] In the rainy alley, the man looks up and says the rain is wrong; identity locked to the face and body boards.
+
+retention_analysis: <Subject 1> (appears in [Shot 1]): fully_preserved - face, glasses and hoodie identical to <Picture 1>/<Picture 2>; expression follows this shot. <Picture 3> ([Shot 1] scene): partially_preserved - alley layout and night light kept.
+
+detailed_description: [Shot 1] 2D hand-drawn anime, cel shading, clean line art, not live-action. A medium shot of <Subject 1> in <Picture 3>, rain on his face; he looks up and says in a low, tense young male voice: <d>[Chinese] 这雨……不对劲。</d> Only he moves his lips. The camera holds on a tripod and does not move.
+
+overall_soundscape: Rain on concrete, a low distant thunder, fabric shifting.
+
+non_diegetic_music: N/A
+```
+
+- 对口型变体：把克隆/TTS 音频挂 `ref_audios.ref_audio_0`，`detailed_description` 里写 `his lips sync to <Audio 1>`，台词文本与音频逐字一致；此时**不要**再让模型自由演情绪台词（音频已定内容）。
+- 参考顺序/职责见 §8；native 节点 `ref_images`/`ref_audios` 用**列表**（`[["16",0]]`），T8 节点用点状键（`t8-pipelines.md`）。
 
 ---
 

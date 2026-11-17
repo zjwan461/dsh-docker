@@ -18,6 +18,8 @@
 
 ## 2. A：H3 图 + 音对口型（U11）
 
+**U11 就是 r2v**：`DenoMiniMaxH3ReferenceToVideo` 是 r2v 节点，靠 `ref_images`（身份）+ `ref_audios`（给定音频）驱动口型。所以"口播/对口型"不绑定 i2v——i2v 接不了参考音频，**给定音频对口型只能走 r2v**。原生情绪口播则 i2v/r2v 皆可（`manju-playbook.md` §5.5）。
+
 节点链（API 格式）：
 
 ```text
