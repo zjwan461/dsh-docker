@@ -36,6 +36,8 @@
 
 **两个实测坑**：
 
+（补充：工作流里其实**同时存在两个限幅参数**——节点 5 的 `peak_limit_minus_3_dbfs: true` 和节点 7 的 `peak_limit_dbfs: -1`，两个都开着，实测出来仍是 +0.19 dBTP，说明这两个开关在 speech 这条链上都没真正生效。别调它们，统一在出片后限。）
+
 1. **`peak_limit_dbfs=-1` 没兜住**：speech 实测 TP **+0.19 dBTP**（>0，削波）。别信节点自带的 peak limit，混音前自己再限一次（`alimiter` 或 loudnorm TP=-1.5）。
 2. **ASR 机检不可用**：`DenoAudioTranscript` 报 `openai-whisper 包缺失`，服务器没装。所以**逐字准确度只能人耳验收**（或本地跑 whisper）；别以为接了这个节点就能自动核字。
 
@@ -171,7 +173,7 @@ python scripts/finish.py --out final.mp4 --clips video.mp4 \
 两条结论：
 
 1. **`amix normalize=0` 必然叠加超限**，混完不补 loudnorm 就是 −9.5 LUFS + 削波。这和 `finish.py` 的"两遍 loudnorm"是同一件事，不是可选项。
-2. **单遍 loudnorm 仍欠 1.5 dB**（−14.49 而非 −16）：线性两遍才能落到目标。`finish.py` 已按两遍实现；手工 ffmpeg 别只跑一遍。
+2. **单遍 vs 两遍不是「跑两次更准」，是两种不同算法。** 只给 `I/TP/LRA` 时 loudnorm 走 **dynamic 模式**：边读边调增益，保守，实测落在 −14.49（差目标 1.5 dB）；两遍的第一遍只是**测量**，把 `measured_I/measured_LRA/measured_TP/measured_thresh` 回填后再跑，才进 **linear 模式**精确配平。要落到 −16 就必须两遍——`finish.py` 已按两遍实现，手工 ffmpeg 别只跑一遍。
 
 ---
 
