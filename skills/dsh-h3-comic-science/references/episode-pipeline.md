@@ -52,7 +52,7 @@ python scripts/episode.py run --plan references/episode.example.json
 python scripts/episode.py run --plan references/episode.example.json --only s3,s4
 ```
 
-清单格式见 `references/episode.example.json`；`kind` 支持 `still / edit / crop / shot / pan`，后续镜头用 `ref` 指向前面镜头的 `id` 即可自动接上本地文件。
+清单格式见 `references/episode.example.json`；`kind` 支持 `still / edit / crop / shot / pan / sr`，后续镜头用 `ref` 指向前面镜头的 `id` 即可自动接上本地文件。`sr` 是可选的一步（交付前放大），见 `references/upscale.md`。
 
 ---
 

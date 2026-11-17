@@ -24,8 +24,9 @@ metadata:
 **本 skill 服务四类平台爆款**：**AI 漫剧**（§3）、**AI 短剧**（§3.5，红果/抖音）、**AI 换脸/重演**（§2.5）、**外星人科普**（§4）。
 同类变体（口播数字人、亲情向、动作迁移、MV、四宫格、动物拟人）见 `references/genres.md` 的类型地图——**换类型就要换节奏，不是换模型**。
 生态里还有 35 套工作流（生图/Wan/LTX/口播克隆）的编目与选型，见 `references/workflow-catalog.md`；权重怎么补见 `references/models.md`。
-**单集怎么落地**（静帧 → 镜头 → 合片的完整流水线与成本表）：`references/episode-pipeline.md`，执行脚本 `scripts/episode.py`（still / edit / crop / shot / pan / run 六个子命令）。
+**单集怎么落地**（静帧 → 镜头 → 合片的完整流水线与成本表）：`references/episode-pipeline.md`，执行脚本 `scripts/episode.py`（still / edit / crop / shot / pan / sr / run 七个子命令）。
 **一集 3 分钟怎么排**（约 50 镜的预算表、剪切理由、接缝分类、常见误区）：`references/episode-3min.md`。
+**交付前放大**（SeedVR2 实测 3.3 秒/帧、细节 = lanczos 3.8 倍、不抖；ESRGAN/FlashVSR 不可用）：`references/upscale.md`。
 
 ```
 ① 这段必须用 H3 吗？

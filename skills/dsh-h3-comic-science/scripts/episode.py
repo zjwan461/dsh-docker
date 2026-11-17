@@ -7,7 +7,8 @@
   3. crop   : 从已有帧竖裁出近景/特写（身份 100% 一致，0 成本）
   4. shot   : H3 i2v（fl2va + turbo LoRA），说话镜 steps=8，其余 steps=4
   5. pan    : 静帧 + zoompan 缓推（远景/易崩镜头用它，零伪影）
-  6. 合片   : 交给 scripts/finish.py（它负责 concat/音床/loudnorm/烧字幕）
+  6. sr     : SeedVR2 3B 超分（可选，见 references/upscale.md；原音轨会带过去）
+  7. 合片   : 交给 scripts/finish.py（它负责 concat/音床/loudnorm/烧字幕）
 
 用法:
   python episode.py --base http://127.0.0.1:8188 still --prompt-file p.txt --out ep01/s1.png
@@ -15,11 +16,12 @@
   python episode.py ... crop  --ref ep01/s2.png --box 180,230,640,1050 --out ep01/s3.png
   python episode.py ... shot  --ref ep01/s2.png --prompt-file q.txt --frames 107 --steps 8 --out ep01/s2.mp4
   python episode.py ... pan   --ref ep01/s5.png --seconds 4.46 --out ep01/s5.mp4
+  python episode.py ... sr    --video ep01/s1.mp4 --short-edge 1080 --out ep01/s1_1080.mp4
   python episode.py ... run   --plan episode.json          # 按清单跑完整集
   python episode.py ... run   --plan episode.json --only s3,s4
 
 约定：
-  - 模型名用 Windows 反斜杠（ComfyUI 在 Windows 上按字符串全等校验 combo）。
+  - 模型名用正斜杠（Linux 部署）；Windows 部署要换回反斜杠，ComfyUI 按字符串全等校验 combo。
   - 输出一律先落到本地文件，再进 finish.py；不要在服务器目录里就地剪。
   - --keep-inputs 会把参考图留在 ComfyUI 的 input 目录，默认也留（H3 需要它做 first_frame）。
 """
@@ -37,18 +39,20 @@ import urllib.request
 _OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 DEFAULTS = {
-    "i2i_unet": "qwen\\qwen_image_2512_fp8_e4m3fn.safetensors",
-    "i2i_lora": "Qwen\\Qwen-Image-2512-Lightning-4steps-V1.0-fp32.safetensors",
-    "edit_unet": "qwen\\qwen_image_edit_2509_fp8_e4m3fn.safetensors",
-    "edit_lora": "Qwen\\Qwen-Image-Edit-2509-Lightning-4steps-V1.0-bf16.safetensors",
+    "i2i_unet": "qwen/qwen_image_2512_fp8_e4m3fn.safetensors",
+    "i2i_lora": "Qwen/Qwen-Image-2512-Lightning-4steps-V1.0-fp32.safetensors",
+    "edit_unet": "qwen/qwen_image_edit_2509_fp8_e4m3fn.safetensors",
+    "edit_lora": "Qwen/Qwen-Image-Edit-2509-Lightning-4steps-V1.0-bf16.safetensors",
     "i2i_clip": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
     "i2i_vae": "qwen_image_vae.safetensors",
-    "h3_unet": "minimax\\minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+    "h3_unet": "minimax/minimax_h3_fl2va_pruned_int8_convrot.safetensors",
     "h3_clip": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
     "h3_vae_video": "minimax_h3_video_vae_fp16.safetensors",
     "h3_vae_audio": "minimax_h3_audio_vae_fp32.safetensors",
-    "turbo4": "minimax\\minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16.safetensors",
-    "turbo8": "minimax\\minimax_h3_fl2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors",
+    "turbo4": "minimax/minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16.safetensors",
+    "turbo8": "minimax/minimax_h3_fl2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors",
+    "sr_dit": "seedvr2_ema_3b_fp8_e4m3fn.safetensors",   # 6.5GB 显存余量可用 fp16
+    "sr_vae": "ema_vae_fp16.safetensors",
 }
 
 
@@ -203,6 +207,38 @@ def graph_shot(prompt, img_name, prefix, w, h, seed, frames, steps, m):
     }
 
 
+def graph_sr(video_name, prefix, short_edge, seed, batch, overlap, m):
+    """SeedVR2 3B 视频超分：原音轨从 VHS_LoadVideo 的 [2] 槽直接带过去。"""
+    if (batch - 1) % 4:
+        batch = ((batch - 1) // 4) * 4 + 1          # 模型要 4n+1
+        print("  ! batch_size 必须是 4n+1，已改成", batch)
+    return {
+        "1": {"class_type": "VHS_LoadVideo",
+              "inputs": {"video": video_name, "force_rate": 0, "custom_width": 0,
+                         "custom_height": 0, "frame_load_cap": 0,
+                         "skip_first_frames": 0, "select_every_nth": 1}},
+        "2": {"class_type": "SeedVR2LoadDiTModel",
+              "inputs": {"model": m["sr_dit"], "device": "cuda:0", "blocks_to_swap": 0,
+                         "swap_io_components": False, "offload_device": "none",
+                         "cache_model": False, "attention_mode": "sdpa"}},
+        "3": {"class_type": "SeedVR2LoadVAEModel",
+              "inputs": {"model": m["sr_vae"], "device": "cuda:0",
+                         "encode_tiled": False, "decode_tiled": False,
+                         "offload_device": "none", "cache_model": False}},
+        "4": {"class_type": "SeedVR2VideoUpscaler",
+              "inputs": {"image": ["1", 0], "dit": ["2", 0], "vae": ["3", 0],
+                         "seed": seed, "resolution": short_edge, "max_resolution": 0,
+                         "batch_size": batch, "uniform_batch_size": True,
+                         "color_correction": "lab", "temporal_overlap": overlap,
+                         "offload_device": "cpu"}},
+        "5": {"class_type": "CreateVideo",
+              "inputs": {"images": ["4", 0], "fps": 24.0, "audio": ["1", 2]}},
+        "6": {"class_type": "SaveVideo",
+              "inputs": {"video": ["5", 0], "filename_prefix": prefix,
+                         "format": "auto", "codec": "auto"}},
+    }
+
+
 # ------------------------------------------------------------------- local ops
 def _pil():
     try:
@@ -291,6 +327,25 @@ def cmd_shot(a, m):
     return 0
 
 
+def cmd_sr(a, m):
+    if a.short_edge not in (0, 720, 1080, 1440, 2160) and a.short_edge < 256:
+        sys.exit("--short-edge 至少 256（一般 720 / 1080）")
+    name = os.path.basename(a.video) if a.dry_run else upload(a.base, a.video)
+    g = graph_sr(name, a.prefix, a.short_edge, a.seed, a.batch, a.overlap, m)
+    if a.dry_run:
+        print(json.dumps(g, ensure_ascii=False, indent=2))
+        return 0
+    print("  ! 1080 短边约 3.3 s/帧：107 帧 ≈ 6 分钟，整集 4300 帧 ≈ 4 小时（见 references/upscale.md）")
+    pid, errs = submit(a.base, g)
+    print("queued", pid, "errors", errs)
+    item, secs = wait(a.base, pid, a.timeout)
+    if not item:
+        print("TIMEOUT"); return 1
+    path = fetch(a.base, item, a.out)
+    print("sr ->", path, secs, "s")
+    return 0
+
+
 def load_plan(path):
     with open(path, encoding="utf-8") as f:
         return json.load(f)
@@ -349,6 +404,14 @@ def cmd_run(a, m):
                 steps=shot.get("steps", 4), out=out,
                 timeout=shot.get("timeout", 3600), dry_run=a.dry_run)
             cmd_shot(ns, m)
+        elif kind == "sr":
+            ns = argparse.Namespace(
+                base=base, video=resolve(shot["ref"]),
+                prefix=shot.get("prefix", "ep/%s" % sid),
+                short_edge=shot.get("short_edge", 1080), seed=shot.get("seed", 42),
+                batch=shot.get("batch", 5), overlap=shot.get("temporal_overlap", 2),
+                out=out, timeout=shot.get("timeout", 7200), dry_run=a.dry_run)
+            cmd_sr(ns, m)
         else:
             sys.exit("未知 kind: %s" % kind)
         if not a.dry_run:
@@ -411,6 +474,16 @@ def main():
     p.add_argument("--timeout", type=int, default=3600)
     common(p, "ep01/s1.mp4")
 
+    p = sub.add_parser("sr")
+    p.add_argument("--video", "--in", dest="video", required=True, help="要超分的本地视频")
+    p.add_argument("--prefix", default="ep/sr")
+    p.add_argument("--short-edge", type=int, default=1080, help="短边目标（720/1080）")
+    p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--batch", type=int, default=5, help="必须 4n+1（5/9/13）")
+    p.add_argument("--overlap", type=int, default=2, help="批间重叠帧，压接缝")
+    p.add_argument("--timeout", type=int, default=7200)
+    common(p, "ep01/s1_1080.mp4")
+
     p = sub.add_parser("run")
     p.add_argument("--plan", required=True, help="episode.json")
     p.add_argument("--out-dir")
@@ -429,6 +502,8 @@ def main():
         return cmd_still(a, "edit", m)
     if a.cmd == "shot":
         return cmd_shot(a, m)
+    if a.cmd == "sr":
+        return cmd_sr(a, m)
     if a.cmd == "crop":
         do_crop(a.ref, [int(x) for x in a.box.split(",")], a.out, (a.width, a.height))
         return 0
