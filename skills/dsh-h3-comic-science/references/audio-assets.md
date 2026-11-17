@@ -24,6 +24,23 @@
 
 **关键**：speech 复用 H3 视频模型，但跑在**极小暗色画布**上、只解码音频——所以它是"H3 当 TTS 用"，不需要出视频，成本低于带视频的口播镜。
 
+### 1.1 实测（2026-11-17，本 skill 模板实跑）
+
+| | U33 speech | M1 BGM |
+|---|---|---|
+| 输出 | `t8_speech_00001.flac` 4.53 s | `m3_bgm_00001.flac` 11.99 s |
+| 规格 | 32 kHz stereo FLAC | 44.1 kHz stereo FLAC |
+| 响度 | −14.11 LUFS / **TP +0.19**（超 0，见下） | −17.41 LUFS / −0.17 TP |
+| 耗时 | ~66 s（20 步，含模型加载） | ~30 s（40 步） |
+| 验收 | 波形有**两段语音 + 1.43 s 分句停顿**，与 `acting_direction: place each clause and stop` 一致 → 表演方向确实生效 | 波形有明确拨弦/钟声瞬态与长衰减，符合 guqin/xun caption |
+
+**两个实测坑**：
+
+1. **`peak_limit_dbfs=-1` 没兜住**：speech 实测 TP **+0.19 dBTP**（>0，削波）。别信节点自带的 peak limit，混音前自己再限一次（`alimiter` 或 loudnorm TP=-1.5）。
+2. **ASR 机检不可用**：`DenoAudioTranscript` 报 `openai-whisper 包缺失`，服务器没装。所以**逐字准确度只能人耳验收**（或本地跑 whisper）；别以为接了这个节点就能自动核字。
+
+**分句停顿**：`acting_direction` 写 `place each clause and stop` 会真的在逗号处留 1.4 s 级别的停顿。做对白要**缩短停顿**（写 `quick, minimal pause between clauses`），否则一句 10 字会拖到 4.5 s。
+
 ---
 
 ## 2. H3 Speech Studio（speech stem）
@@ -139,7 +156,22 @@ python scripts/finish.py --out final.mp4 --clips video.mp4 \
 
 - 视频若自带混音且只要它的画面：先 `-an` 去掉 baked 音轨，再铺 speech + BGM。
 - 换音乐 = 换 `--music` 文件重跑，**对白不动**。
-- 响度顺序：先对白 −16 LUFS → 铺 BGM（低 12–18dB）→ 限幅（`bgm.md`）。
+- 响度顺序：先对白 −16 LUFS → 铺 BGM（低 12–18dB）→ **最后再 loudnorm 一遍**（`bgm.md`）。
+
+### 4.1 混音实测（speech + Music3 BGM）
+
+同一条 4.53 s speech + 12 s BGM，`sidechaincompress`（threshold .02 / ratio 12 / attack 5 / release 450 / knee 6）+ `amix normalize=0`：
+
+| 链 | 结果 |
+|---|---|
+| 先 `loudnorm` 对白 → 加 BGM → `amix` 后就结束 | **−9.50 LUFS / TP +0.40（削波）** |
+| 同上，**最后再 `loudnorm I=-16 TP=-1.5`** | −14.49 LUFS / TP −1.49 ✅ |
+| speech 单独 | −14.11 LUFS / TP +0.19 |
+
+两条结论：
+
+1. **`amix normalize=0` 必然叠加超限**，混完不补 loudnorm 就是 −9.5 LUFS + 削波。这和 `finish.py` 的"两遍 loudnorm"是同一件事，不是可选项。
+2. **单遍 loudnorm 仍欠 1.5 dB**（−14.49 而非 −16）：线性两遍才能落到目标。`finish.py` 已按两遍实现；手工 ffmpeg 别只跑一遍。
 
 ---
 

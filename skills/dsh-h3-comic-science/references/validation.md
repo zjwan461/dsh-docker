@@ -67,6 +67,24 @@
 
 服务器任务历史里存在 `*_speech_*.flac` 与 `*_bgm_*.flac`：speech 由 **H3 T8 SpeechStudio**（音频-only，小画布只解码音频）产出，BGM 由 **MiniMax Music 3** 产出。据此新增 `U33`/`M1` 工作流与 `audio-assets.md`，**validate 通过**；但本 skill 模板尚未实际提交（服务器忙）。情绪/语速为未校准方向提示、中文需逐条听等边界见 `audio-assets.md` §2.3。
 
+## 6.7 独立音频产物（2026-11-17 实跑通过）
+
+服务器任务历史里存在 `*_speech_*.flac` 与 `*_bgm_*.flac`：speech 由 **H3 T8 SpeechStudio**（音频-only，小画布只解码音频）产出，BGM 由 **MiniMax Music 3** 产出。据此新增 `U33`/`M1` 工作流与 `audio-assets.md`。
+
+**本 skill 模板实跑（队列空闲时）**：
+
+| | U33 speech | M1 BGM |
+|---|---|---|
+| 输出 | `t8_speech_00001.flac` 4.53 s | `m3_bgm_00001.flac` 11.99 s |
+| 规格 | 32 kHz stereo | 44.1 kHz stereo |
+| 响度 | −14.11 LUFS / **TP +0.19** | −17.41 LUFS / −0.17 TP |
+| 耗时 | ~66 s | ~30 s |
+| 内容验证 | 波形两段语音 + **1.43 s 分句停顿**，与 `place each clause and stop` 一致 | 拨弦/钟声瞬态 + 长衰减，符合 caption |
+
+**坑**：① `peak_limit_dbfs=-1` 未兜住，实测 TP **+0.19** 削波，混音前须自限；② `DenoAudioTranscript` 缺 `openai-whisper` 包，**ASR 机检不可用**，逐字只能人耳；③ 分句停顿 1.4 s 偏长，对白要写短停顿。
+
+**混音实测**：`amix normalize=0` 后不补 loudnorm = **−9.50 LUFS / TP +0.40**；补一遍 = −14.49 / −1.49（单遍仍欠 1.5 dB，需线性两遍）。
+
 ## 7. 换脸（Character Swap LoRA）
 
 - 三个 LoRA（character_swap v1.1 / head_swap v1.0 / preprocessor_map）**装好即被识别**，无需重启。
@@ -94,4 +112,6 @@
 - T8 U22/U24 的实际效果（服务器忙，未提交）
 - Wan / LTX 替代路线（未跑）
 - 定稿档（0.7–1.0MP、20–25步）的绝对值（以上全是 0.4MP 打样档）
-- U33 speech stem / M1 Music3 BGM 的本模板实跑（validate 通过；节点图源自服务器真实历史）
+- U33 speech 的**逐字准确度**（ASR 依赖缺失，仅波形/停顿间接证明；需人耳或本地 whisper）
+- M1 BGM 与 caption 的**听感符合度**（只有波形瞬态证据）
+- 两条 T8 speech 的**多人对白拼接**、长段（>30s）连续性
