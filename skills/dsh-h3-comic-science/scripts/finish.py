@@ -15,7 +15,7 @@
     python finish.py --out final.mp4 --clips clips/*.mp4 --ass subs.ass
 
 注意:
-    - 中间文件落在 --workdir（默认 ./.finish），不用 %TEMP%（本机 D:\\temp 不可写）
+    - 中间文件落在 --workdir（默认 ./.finish），不用系统临时目录（可能不可写或空间不足）
     - 响度默认两遍 loudnorm，目标 -16 LUFS / -1.5 dBTP
     - 没有音轨的片段会自动补静音，不会让合片失败
 """

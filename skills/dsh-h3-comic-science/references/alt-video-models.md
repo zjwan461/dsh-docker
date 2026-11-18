@@ -108,5 +108,5 @@ VAEDecode(video) + VAEDecodeAudio
 ## 6. 边界
 
 - 换模型 = 换一套权重与节点，**画风会变**；同一集不要混用两个视频模型（除非刻意做风格段）。
-- Wan/LTX 的工作流节点多、显存重；本机能否跑要先 `comfy.py validate` + 小样。
+- Wan/LTX 的工作流节点多、显存重；能否跑要先 `comfy.py validate` + 小样。
 - 这些工作流来自社区，**参数是作者环境下的最优**，换卡要重调。

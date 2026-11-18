@@ -1,6 +1,6 @@
 # 单集流水线（静帧 → 镜头 → 合片）
 
-**这一页是"从零到一条能发的竖屏短片"的最短路径**，附一条实测过的 22 秒 5 镜样片数据（2026-11，RTX 4080S 32G，模型与工作流版本见 `references/workflows/`）。执行脚本：`scripts/episode.py`；合片仍用 `scripts/finish.py`。
+**这一页是"从零到一条能发的竖屏短片"的最短路径**，附一条实测过的 22 秒 5 镜样片数据（2026-11，单卡 32G 级；耗时随卡变，模型与工作流版本见 `references/workflows/`）。执行脚本：`scripts/episode.py`；合片仍用 `scripts/finish.py`。
 
 ---
 

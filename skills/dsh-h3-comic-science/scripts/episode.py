@@ -35,7 +35,7 @@ import time
 import urllib.parse
 import urllib.request
 
-# 本机 ComfyUI 不走系统代理
+# 本地/局域网 ComfyUI 不走系统代理
 _OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 DEFAULTS = {

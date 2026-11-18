@@ -20,7 +20,7 @@ def base_url(a):
     b = a.base or os.environ.get("COMFYUI_BASE") or "http://127.0.0.1:8188"
     return b.rstrip("/")
 
-# 局域网/本机 ComfyUI 不能走代理：忽略 HTTP(S)_PROXY 环境变量
+# 本地/局域网 ComfyUI 不能走代理：忽略 HTTP(S)_PROXY 环境变量
 _OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
