@@ -1,7 +1,7 @@
 ---
 name: dsh-h3-comic-science
 description: 用 MiniMax H3 做四类平台爆款——**AI 漫剧**、**AI 短剧**（红果/抖音，80 集竖屏连续剧）、**AI 换脸/重演**（rapper swap、世界巡演）、**外星人科普**，也能脱离插件直连 ComfyUI 跑任意工作流。含**决策入口**（对白镜还是插入镜、口播走 i2v 还是 r2v、用不用 H3）、**H3 官方语法**（三段/六段、`<d>` 台词、`(S1)` 说话人、17k+5 帧、cfg=1 无负面词）、**通用镜头工艺**（多人站位与闭嘴锁、因果式运镜、八种转场、武打六拍、Hub/Chain 长片连续性、换脸、T8 管线）、**四条产线**（漫剧 / 短剧 / 换脸重演 / 科普）、**声音**（口播为主 i2v/r2v、克隆+对口型、旁白仅补、BGM 无分轨与闪避、字幕路线）、**导演风格**（七轴 DNA→H3 字段）、**后期质检**（finish/qa/seam）与 **LoRA 目录**。附 26 套随包 API 工作流、`fetch-models.sh` 权重下载脚本与纯标准库客户端 `comfy.py`。用户要做漫剧/科普/分镜/换脸/口播/长片，或在 ComfyUI 上跑 H3、Wan、LTX、Qwen 生图时加载。
-whenToUse: 用户要做 AI 漫剧、动态漫、竖屏短剧；要做红果/抖音类 AI 短剧（80 集、90–120 秒一集、付费卡点、断章）；要做 AI 换脸/重演（演唱会换脸、rapper swap、影视片段换人）；要做"外星人给地球人讲知识"这类双人对话科普；要做口播数字人、亲情向、动作迁移、歌词 MV、四宫格分镜；要写分镜、台词、站位、运镜、转场、打戏；要模仿某位导演的视觉风格（王家卫/韦斯·安德森/诺兰/维伦纽瓦/张艺谋等作者电影感）；要决定静态漫还是动态漫、原生口播还是 TTS；要做换脸/人物替换；要跑 T8/U22/U24、Wan 首尾帧、LTX MSR 等高级工作流；要脱离插件直连 ComfyUI 提交任务、查状态、取成品；要排查画风漂移、口型错人、声线不分、台词被截、字幕自现、打斗发软、成片削波。
+whenToUse: 用户要做 AI 漫剧、动态漫、竖屏短剧；要做红果/抖音类 AI 短剧（80 集、90–120 秒一集、付费卡点、断章）；要做**动物拟人/萌宠剧**（真猫心声吐槽、拟人萌宠开口、萌系动物 CP 无对白动作喜剧、宠物说话）；要做 AI 换脸/重演（演唱会换脸、rapper swap、影视片段换人）；要做"外星人给地球人讲知识"这类双人对话科普；要做口播数字人、亲情向、动作迁移、歌词 MV、四宫格分镜；要写分镜、台词、站位、运镜、转场、打戏；要模仿某位导演的视觉风格（王家卫/韦斯·安德森/诺兰/维伦纽瓦/张艺谋等作者电影感）；要决定静态漫还是动态漫、原生口播还是 TTS；要做换脸/人物替换；要跑 T8/U22/U24、Wan 首尾帧、LTX MSR 等高级工作流；要脱离插件直连 ComfyUI 提交任务、查状态、取成品；要排查画风漂移、口型错人、声线不分、台词被截、字幕自现、打斗发软、成片削波。
 metadata:
   version: 2
   requires: [ffmpeg, python3]
@@ -22,7 +22,8 @@ metadata:
 ## 0. 决策入口（先回答四个问题）
 
 **本 skill 服务四类平台爆款**：**AI 漫剧**（§3）、**AI 短剧**（§3.5，红果/抖音）、**AI 换脸/重演**（§2.5）、**外星人科普**（§4）。
-同类变体（口播数字人、亲情向、动作迁移、MV、四宫格、动物拟人）见 `references/genres.md` 的类型地图——**换类型就要换节奏，不是换模型**。
+同类变体（口播数字人、亲情向、动作迁移、MV、四宫格、**动物拟人**）见 `references/genres.md` 的类型地图——**换类型就要换节奏，不是换模型**。
+**动物拟人/萌宠剧**：三条路线（真动物+心声 / 拟人开口 / 无对白动作喜剧）、角色卡三开关（站姿/手/嘴）、招牌能力与记号、一集一地点、每格 ≥2 秒——见 `references/animal-anthropomorphic.md`。
 生态里还有 35 套工作流（生图/Wan/LTX/口播克隆）的编目与选型，见 `references/workflow-catalog.md`；权重怎么补见 `references/models.md`。
 **单集怎么落地**（静帧 → 镜头 → 合片的完整流水线与成本表）：`references/episode-pipeline.md`，执行脚本 `scripts/episode.py`（still / edit / crop / shot / pan / sr / run 七个子命令）。
 **一集 3 分钟怎么排**（约 50 镜的预算表、剪切理由、接缝分类、常见误区）：`references/episode-3min.md`。
@@ -373,7 +374,7 @@ LoRA 用法与强度见 `references/lora-catalog.md`。
 
 **语法与工艺**：`references/h3-prompt-spec.md` / `references/h3-tuning.md`（官方格式补遗 + 步数/加速器/显存）/ `references/dialogue-blocking.md` / `references/camera-and-transitions.md` / `references/action-dynamics.md` / `references/longform-continuity.md` / `references/director-styles.md`（导演风格）
 
-**产线**：`references/manju-playbook.md`（漫剧）/ `references/short-drama.md`（红果短剧）/ `references/science-playbook.md`（科普）/ `references/face-swap.md`（换脸）/ `references/image-pipelines.md` / `references/templates.md`
+**产线**：`references/manju-playbook.md`（漫剧）/ `references/short-drama.md`（红果短剧）/ `references/science-playbook.md`（科普）/ `references/face-swap.md`（换脸）/ `references/animal-anthropomorphic.md`（动物拟人）/ `references/image-pipelines.md` / `references/templates.md`
 
 **功能**：`references/t8-pipelines.md` / `references/native-dialogue.md` / `references/talking-head.md` / `references/bgm.md` / `references/subtitles.md` / `references/audio-assets.md`（独立 speech/BGM 产物）
 
