@@ -29,6 +29,11 @@ H3 的 LoRA 分四类：**加速**、**风格**、**功能**、**动作/修复**
 
 **turbo 的实测效果（U06V9，512×288/1s）**：不挂 turbo 8 步 371s；挂 turbo 8 步 390s（**没有更快**）；挂 turbo 砍到 4 步 **260s（-33%）**，画面结构一致、只是略软。所以 turbo 的价值是**允许少步数**，不是它自己加速。
 
+**turbo 的真实代价在声音上**（社区多人一致 + 评测网格）：蒸馏**劣化音频**，尤其伤最安静/持续的声区（长音、耳语、低声台词），还会把口音与中英混说拉回通用腔，硬切容易糊成叠化。所以：
+- **对白成片要么 20 步无 turbo，要么 turbo 打样后用同一 seed 无 turbo 重跑取干净音频**；
+- 只借速度、要保嗓音时把 turbo strength 降到 **0.75**。
+详见 `h3-tuning.md` §4。
+
 **判断 LoRA 有没有生效别看 `patches attached`**：它在只挂 turbo 和同时挂 turbo+Combat+Fight_Flow 时**都是 208**——那数字是被打补丁的权重个数，不是 LoRA 个数。要看画面，或看日志里有没有 `lora ... shape is invalid` / `lora key not loaded`。
 
 **武打链的接法（API 格式没有 bypass，只能删节点或串起来）**：`UNETLoader → turbo(1.0) → H3_Combat_V2(0.65) → H3_Fight_Flow_V1(0.35) → 采样器`，4 步；实测 280s 出片，画面里机位更宽、多了环境建筑，确实吃到了 LoRA。

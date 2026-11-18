@@ -174,7 +174,7 @@
 首帧是硬约束，提示词**只写运动与表演**，不重述画面：
 
 ```text
-integrated_multimodal_description: [Shot 1] 2D hand-drawn anime, cel shading, clean line art, not live-action. Keep the face, hair, outfit and background of <Picture 1> unchanged. The camera pushes in with small amplitude at slow speed as his eyes narrow and his jaw tightens; he says in a low, tense young male voice: <d>[Chinese] 这雨……不对劲。</d> Rain streaks past the frame. Only he moves his lips.
+integrated_multimodal_description: [Shot 1] 2D hand-drawn anime, cel shading, clean line art, not live-action. Keep the face, hair, outfit and background of <Picture 1> unchanged. The camera pushes in with small amplitude at slow speed as his eyes narrow and his jaw tightens; he says in a low, tense young male voice: <d>[Chinese] 这雨，不对劲。</d> Rain streaks past the frame. Only he moves his lips.
 
 overall_soundscape: Rain on concrete, a low distant thunder, fabric shifting.
 
@@ -198,7 +198,7 @@ summary: [reference generation] In the rainy alley, the man looks up and says th
 
 retention_analysis: <Subject 1> (appears in [Shot 1]): fully_preserved - face, glasses and hoodie identical to <Picture 1>/<Picture 2>; expression follows this shot. <Picture 3> ([Shot 1] scene): partially_preserved - alley layout and night light kept.
 
-detailed_description: [Shot 1] 2D hand-drawn anime, cel shading, clean line art, not live-action. A medium shot of <Subject 1> in <Picture 3>, rain on his face; he looks up and says in a low, tense young male voice: <d>[Chinese] 这雨……不对劲。</d> Only he moves his lips. The camera holds on a tripod and does not move.
+detailed_description: [Shot 1] 2D hand-drawn anime, cel shading, clean line art, not live-action. A medium shot of <Subject 1> in <Picture 3>, rain on his face; he looks up and says in a low, tense young male voice: <d>[Chinese] 这雨，不对劲。</d> Only he moves his lips. The camera holds on a tripod and does not move.
 
 overall_soundscape: Rain on concrete, a low distant thunder, fabric shifting.
 

@@ -109,12 +109,13 @@ non_diegetic_music: N/A
 
 **六段式**（带任何参考图，r2v）：`subject_definitions / summary / retention_analysis / detailed_description / overall_soundscape / non_diegetic_music`。
 
-- 首镜不写时间码；后续 `At 00:03.500,` 严格递增。
-- 台词：`(S1)` 说话人 + `<d>[Chinese] 逐字台词。</d>`；身份/音色/语速写在 `<d>` **外**。
-- 保留强度：`fully_preserved / partially_preserved / attribute_transfer / weak_reference`。
+- 首镜不写时间码；后续 `At 00:03.500,` 严格递增（单个时间戳，不写区间）。
+- 台词：`(S1)` 说话人 + `<d>[Chinese] 逐字台词。</d>`；身份/音色/语速写在 `<d>` **外**；`<d>` 里只用 `, . ? !`，**别用省略号**（伤可懂度），听不清写 `[unclear]`。
+- 画面可见文字用英文双引号逐字保留原语言（`a sign reading "营业中"`），**不要写进 `<d>`**。
+- 保留强度（画面）：`fully_preserved / partially_preserved / attribute_transfer / weak_reference`；**音频另有一套**：`fully_copy / partially_copy / reference / weak_reference`。
 - 提示词上限约 **7000 字符**。
 
-完整语法（标签、运镜词表、音频三层、多镜容器）见 `references/h3-prompt-spec.md`。
+完整语法（标签、运镜词表、音频三层、多镜容器）见 `references/h3-prompt-spec.md`；官方格式补遗与调参见 `references/h3-tuning.md`。
 
 ### 1.2 时长与分辨率
 
@@ -288,6 +289,8 @@ cfg=1，没有负面分支。`no subtitles / no text / not photorealistic` 会**
 口播情绪写法（强表演短语、短窗+无声尾动作、微表情节拍）见 `references/native-dialogue.md`。
 克隆/对口型/长口播见 `references/talking-head.md`。
 
+**步数与音频的取舍**（官方 + 社区实测）：20 步是 ComfyUI 的速度妥协，官方推荐 30–50；Ref2VA 至少 20 步音频才像样。**turbo 会一致地劣化音频**（伤气声/长音、拉平口音、硬切糊成叠化），只适合打样。所以对白成片：**要么 20 步无 turbo，要么 turbo 打样后同一 seed 无 turbo 重跑**。详见 `references/h3-tuning.md`。
+
 ### 5.2 BGM
 
 **视频 baked 音轨是一条混音**（无法事后分离），且 H3 会自己加音乐（省略 `non_diegetic_music` 就补）。**但分轨可以独立生成**：speech 用 H3 T8 Speech Studio（U33）、BGM 用 MiniMax Music 3（M1），两者是独立 FLAC，后期可"保留对白只换音乐"。见 `references/audio-assets.md`。
@@ -368,7 +371,7 @@ LoRA 用法与强度见 `references/lora-catalog.md`。
 
 **开头与钩子**：`references/hooks.md`（十种钩子句式、口播节奏、A/B 测试、失败清单）
 
-**语法与工艺**：`references/h3-prompt-spec.md` / `references/dialogue-blocking.md` / `references/camera-and-transitions.md` / `references/action-dynamics.md` / `references/longform-continuity.md` / `references/director-styles.md`（导演风格）
+**语法与工艺**：`references/h3-prompt-spec.md` / `references/h3-tuning.md`（官方格式补遗 + 步数/加速器/显存）/ `references/dialogue-blocking.md` / `references/camera-and-transitions.md` / `references/action-dynamics.md` / `references/longform-continuity.md` / `references/director-styles.md`（导演风格）
 
 **产线**：`references/manju-playbook.md`（漫剧）/ `references/short-drama.md`（红果短剧）/ `references/science-playbook.md`（科普）/ `references/face-swap.md`（换脸）/ `references/image-pipelines.md` / `references/templates.md`
 
