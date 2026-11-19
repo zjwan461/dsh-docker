@@ -98,10 +98,29 @@ workflows/
 
 ```
 要"对嘴/给定音频"？ → U11（短）/ J13（长）；音色先 N2 克隆
-要"锁多个角色/音色"？ → r2v / U22 / U06V9；要"精确续接构图"？ → i2v / G02
+要"锁脸"？ → i2v（首帧硬锚定）/ G02（Wan 首尾帧）/ P02（动作迁移）
+要"多主体同框"？ → H41（LTX MSR，专用 IC-LoRA）；H3 r2v 只做构图
 只是要静帧/三视图/洗图？ → image/（A01/B13/C19/T4/A08），别烧视频 GPU
 要"独立 speech / 可换 BGM"？ → U33（speech stem）+ M1（BGM stem），后期混音
 ```
+
+### ⚠️ 身份强度：不是所有"参考生视频"都一样
+
+**H3 的 r2v 锁不住人脸，不代表别的机制也锁不住。** 逐个节点盘点后的强度谱系：
+
+| 机制 | 强度 | 工作流 | 说明 |
+|---|---|---|---|
+| 首帧硬锚定 | ★★★★★ | `h3/h3_i2v_api`、`video/G02-Wan首尾帧` | latent 注入第 0 帧；实测 i2v 身份余弦 0.89 |
+| Guide frames | ★★★★☆ | `video/Y08-LTX四宫格` | `LTXVAddGuideMulti` 多帧引导 |
+| IC-LoRA 多主体参考 | ★★★★☆ | `video/H41-LTX-MSR多参考` | `LiconMSR` 专为多主体训练 |
+| 姿态/动作重定向 | ★★★★☆ | `video/P02-WanAnimate` | 姿态锁空间，外观图给身份 |
+| 图像锚定+分段续接 | ★★★☆☆ | `video/J13-InfiniteTalk` | 每段有图，但 20 段链式累积漂移 |
+| **H3 r2v 参考条件** | **★★☆☆☆** | `h3_r2v`、`U06V9`、`U11`、`U17`、`U22`、`U30`、`U24`/`U32` | **无任何帧锚点**；带音频时最脆（余弦可掉到 0.09） |
+| 纯音频 | — | `M1`、`U33`、`N2` | 无画面身份 |
+
+**结论**：H3 r2v 家族（`MiniMaxH3ReferenceToVideo` / `Deno…` / `MiniMaxH3AudioConditioningT8`）是唯一共享"无帧锚点"弱点的组。**要锁脸就换 i2v / G02 / P02，要多主体就换 H41。**
+
+根因、量化证据与四种修法见 `../h3-tuning.md` §8；r2v 适合什么（属性迁移/场景/音色/多主体构图/非人角色）见 §8.7。
 
 > 换脸路线 B（Character Swap LoRA 严格跟原片）的工作流在 `references/character-swap-api.json`（不在本目录）；路线 E 用本目录 `E1`+`h3_i2v`。详见 `references/face-swap.md`。
 > 图形/字卡/片头/数据动效不走这里，走兄弟 skill `motion-showreel`。
