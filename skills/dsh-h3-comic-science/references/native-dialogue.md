@@ -32,6 +32,39 @@
 - 机器人脸 = 固定凝视 + 机械眨眼 → 加自然呼吸、小幅视线、不对称。
 - 过戏 = 重复 intensifier（extremely terrified, shocked and devastated）→ 换成一个克制过渡 + 边界（no grimace, no wide eyes）。
 
+## 2.5 三层分工：音色 / Business（身体）/ Delivery（这一句怎么演）
+
+**"演技僵硬"多半不是情绪词不够，而是把演技全塞进了台词行。** 三层各管一段：
+
+| 层 | 管什么 | 写在哪 |
+|---|---|---|
+| ① **音色 desc** | 这个人**平时**怎么说话 | 音色描述（克隆/口播音色设定） |
+| ② **Business 行** | 说这句时**身体在做什么** | `<d>` 外，分 `before the line` / `after the line` |
+| ③ **Delivery 行** | **这一句**怎么演（气口/音量/音高/瑕疵） | `<d>` 外 |
+
+```text
+音色 desc：女声 26 岁。音区中、声音清；咬字干脆、字字落地；说话慢而稳，句尾不飘。
+Business before the line: her thumb finds the ring and turns it a quarter turn, once, slowly.
+Business after the line: her hand lowers half an inch and stops; she keeps looking at him.
+Delivery: she does not raise her voice. Each word placed separately, the last word landing flat
+  like a full stop. Jaw tight, eyes on his face without blinking, breath already gone quiet.
+<Subject 1> says (voice reference <Audio 1>): <d>[Chinese] 这婚不结了。</d>
+```
+
+**Delivery 只写可观测的物理量**，不写形容词：
+
+- 音量走向：`keeps it low on purpose` / `pulls the volume down mid-sentence`
+- 停顿气口：`starts on an exhale` / `waits half a beat`
+- 音高走向：`the last three words go down in pitch instead of up — not triumphant, tired`
+- 破音瑕疵：`her voice cracks upward at the top of the second word`
+- 眼神身体：`does not look at her hand, looks at her face` / `chin juts forward`
+
+> ⛔ **别写"她很生气/很伤心"**——模型不会演形容词，只会演**动作与气息**。
+> 实测对比（同台词同镜头）：旧版"眼睛垂下、嘴闭着、手自然垂着"→ 像拍照片；
+> 新版"盯着对方、嘴正在说、戒指手推向镜头、下巴抬起脖颈绷着"→ 像在吵。
+
+**为什么不能把表演写进台词行**：`<d>` 里只能有 `[Chinese] 逐字台词`（多一个中文字都会被念出来，见 `h3-tuning.md` §1.3.1）。所以表演信息要**搬到 `<d>` 外面**，不是删掉。
+
 ## 3. 台词时间窗：短句 + 短窗 + 明确无声尾动作（防“尾部乱说”）
 
 - **短台词配过长时间窗、说完没有后续动作 → 模型继续即兴加话**（尾部乱说/额外英文）。这是实测反复出现的根因。

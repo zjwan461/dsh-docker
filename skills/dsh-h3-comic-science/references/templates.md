@@ -7,12 +7,15 @@
 
 ## 1. 漫剧 · 单镜 i2v（首帧已定）
 
+> ⚠️ **占位符必须替换成英文**：提示词里 `<d>` 以外的任何中文都会被 H3 当台词念出来（`h3-tuning.md` §1.3.1）。
+> 下面 `{CAMERA}` / `{ACTION}` 这类是**英文占位标记**，填内容时也用英文。
+
 ```text
-integrated_multimodal_description: [Shot 1] 2D hand-drawn anime, cel shading, clean bold line art, flat color blocks, not live-action, not photographed. The framing, character design, outfit and lighting follow <Picture 1> exactly; keep the face, hairstyle and background unchanged. {运镜：The camera pushes in with small amplitude at slow speed / holds a static shot / pans right with small amplitude}. {动作：他的眼神收紧，右手在袖中慢慢握成拳}. {环境动态：雨丝斜掠过画面，衣角被风掀起}. {他不出声。}
+integrated_multimodal_description: [Shot 1] 2D hand-drawn anime, cel shading, clean bold line art, flat color blocks, not live-action, not photographed. The framing, character design, outfit and lighting follow <Picture 1> exactly; keep the face, hairstyle and background unchanged. {CAMERA: the camera pushes in with small amplitude at slow speed / holds a static shot / pans right with small amplitude}. {ACTION: his eyes narrow and his right hand slowly closes into a fist inside his sleeve}. {AMBIENCE: rain streaks slant across the frame, the hem of his coat lifts in the wind}. {He makes no sound; his lips stay closed.}
 
-overall_soundscape: {雨打铁皮棚，远处一声闷雷，布料摩擦的轻响}.
+overall_soundscape: {rain on a corrugated tin roof, one distant low thunder, the soft rasp of fabric}.
 
-non_diegetic_music: {N/A 或 一记低频太鼓，慢速，无旋律}.
+non_diegetic_music: {N/A, or one low taiko hit at a slow tempo, no melody}.
 ```
 
 ---

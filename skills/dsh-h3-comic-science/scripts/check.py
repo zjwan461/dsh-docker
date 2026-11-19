@@ -120,6 +120,12 @@ def main():
                 if re.search(pat, prompt, re.I):
                     warns.append("%s: %s" % (sid, why))
 
+            # <d> 以外的中文会被当台词念出来（h3-tuning §1.3.1）
+            outside = re.sub(r"<d>.*?</d>", "", prompt, flags=re.S)
+            cn = re.findall(r"[\u4e00-\u9fff]", outside)
+            if cn:
+                errors.append("%s: 提示词 <d> 之外有 %d 个汉字（会被当台词念出来）→ 全改英文" % (sid, len(cn)))
+
             if fmt == "manju" and not re.search(r"\b(2d|anime|manhua|comic|cel shading)\b", prompt, re.I):
                 warns.append("%s: 漫剧但提示词没声明二维介质（会滑向实拍）" % sid)
 

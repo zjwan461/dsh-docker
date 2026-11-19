@@ -93,6 +93,27 @@ The camera holds a static shot as the door closes.
 
 每次切景别至少跳一级：广角 → 特写，或特写 → 广角。中景接中景，观众感觉像"卡了一下"。
 
+**更进一步：一场戏的景别应该是一条"梯子"**，而不是随手挑：
+
+```text
+建置（最大景别：全景/双人全） → 中近 → 近 → 近（反打） → 中近 → 收尾回大景别
+```
+
+对话戏最稳的一条线就是 `全 → 中近 → 近 → 近(反打) → 中近 → 全`。
+
+**反打成对的三条**（否则两镜剪在一起脸会"大小跳"）：
+
+1. 单人近景 A 与单人近景 B **必须同焦距、同机高、镜像机位**；
+2. 轴线（180°）**不许越**——建置镜里谁在左谁在右，全场不许换；反打是"绕到对面那一侧"，不是"换一边拍"；
+3. **竖屏要压缩站位**：两人并排时横向距离要贴，否则竖屏里一半是墙（横屏才可以拉开演距离变化）。
+
+**景别配比参考**（一集内）：中景 ≈50%、特写 ≈30%、全景 ≈15%、特殊 ≈5%。
+全片都是中近景，剪起来就像同一镜被切碎。
+
+**⛔ 常见错**：六镜全写 `[Static shot] Two-shot medium` ⇒ 像碎镜；该演"两人距离变化"却用单人镜 ⇒ 白演；反打两镜一个 35mm 一个 50mm ⇒ 脸大小跳，像换了场景。
+
+**自检**：把一集所有景别排成一行，出现**连续两级相同**或**反打不同机高**，就是没排好。
+
 ### 2.2 15 秒的信息预算
 
 | 镜数 | 适合 |
@@ -339,9 +360,9 @@ The camera pushes in with large amplitude at slow speed into the pupil until bla
 ### 9.4 尾帧接力（两段 8 秒）
 
 ```text
-第 1 段：... he turns and walks toward the lit doorway; the shot ends with his silhouette in the doorway, motion settling.
-第 2 段首行：For the target video, at 0.00 seconds into the target video, <Picture 1> (from [Shot 1]) is fully referenced.
-第 2 段正文：... he continues through the doorway into the bright corridor, the same silhouette, the same walking rhythm.
+[Segment 1 - tail] ... he turns and walks toward the lit doorway; the shot ends with his silhouette in the doorway, motion settling.
+[Segment 2 - first line] For the target video, at 0.00 seconds into the target video, <Picture 1> (from [Shot 1]) is fully referenced.
+[Segment 2 - body] ... he continues through the doorway into the bright corridor, the same silhouette, the same walking rhythm.
 ```
 
 ---
@@ -368,3 +389,50 @@ The camera pushes in with large amplitude at slow speed into the pupil until bla
 - **否定词进 H3 会反噬**：加 `nothing floats in front of the lens` 之后，镜头前的漂浮光斑/颗粒反而**变多**（同 seed 删掉即干净）。原则：只描述"画面里有什么"，不描述"没有什么"。
 - 但也不能一路删：把姿态和房间描述删空后人物会崩（发光剪影、手臂拉长）。**保留姿态 + 会动的物件，删掉一切关于空气、颗粒、特效的措辞。**
 - 远景（人小、灯多、有浮尘）本质上是 i2v 的弱项。要一个稳的收尾镜头，宁可**静帧 + `zoompan` 缓推**，也别硬生成（见 `delivery-and-qa.md` §9）。
+
+---
+
+## 背景老是变？那是光在漂 + 机位在推（三把锁）
+
+**症状**：同一条镜头里背景"变了个样"——开头灯全亮暖白，结尾像被关灯、整体压暗偏蓝、画面收紧。
+
+**根因往往不是模型不听话，是你写的两句提示词**：
+
+| 写了什么 | 模型理解成 |
+|---|---|
+| `End on the bulb flickering once` | 灯要灭 ⇒ 后半段压暗 |
+| 只有 `[Static shot]`（只给机位类型） | 静止镜头也可以**慢慢推** ⇒ 画面收紧 |
+
+实测同一条 3.75 s 镜头：旧版首尾帧 **SSIM 0.404**；加了三把锁后 **0.983**。
+
+### 三把锁（每个要求稳的镜头都写）
+
+```text
+Lighting, <原光位描述>. The light in this shot never changes: same brightness,
+  same colour temperature, same direction, from the first frame to the last.
+  No lamp switches off, no flicker, no dimming.
+
+[Static shot] <景别/机位>. The camera is completely locked: no zoom, no push-in,
+  no reframing, the framing is identical from the first frame to the last.
+
+Background lock, the set is the same set for the whole shot and must match <Subject 3> exactly:
+  the same wall with the damp patch, the same folding table, the same stools,
+  the same curtain and window. No new furniture, no furniture moving,
+  no camera move that reveals another part of the room.
+```
+
+**⛔ 禁用词**：`flicker / blinking / light goes out / 灯闪一下 / 灯灭` —— 一律会被演成"灯真的灭了"。
+要"氛围变化"就写**人物与环境声**，别动光。
+
+> 这与本文件开头"锁机位别写不要动"并不矛盾：`[Static shot]` 是模型自己的运镜词表（该写），
+> 但**只写它不够**，必须再加一句明确的"完全不锁死"状态句（no zoom / no push-in / framing identical）。
+
+### 判据（可量化，不靠眼睛）
+
+```bash
+ffmpeg -ss 0.3 -i shot.mp4 -frames:v 1 a.png
+ffmpeg -ss <时长-0.4> -i shot.mp4 -frames:v 1 b.png
+ffmpeg -i a.png -i b.png -filter_complex ssim -f null -   # 看 All:xx
+```
+
+**单镜首尾 SSIM < 0.75 ⇒ 光或机位漂了，重抽。** 0.90 以上正常；人物动作大时可略低，但背景该固定。

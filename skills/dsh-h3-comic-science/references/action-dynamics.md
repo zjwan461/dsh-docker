@@ -24,9 +24,12 @@
 ## 2. 每镜五小节（打斗必须写满）
 
 ```text
-[Shot N] At MM:SS.mmm, the shot cuts to a <景别> (<焦距>, <机位>) of <主体>, as the camera <运镜>.
+[Shot N] At MM:SS.mmm, the shot cuts to a <SHOT SIZE> (<FOCAL LENGTH>, <CAMERA POSITION>) of <SUBJECT>, as the camera <CAMERA MOVE>.
 Camera: …  Motion: …  Performance: …  Light: …  Sound: …
 ```
+
+> ⚠️ 尖括号里是**英文占位标记**（`<SHOT SIZE>` / `<CAMERA MOVE>`），填内容时也用英文——
+> `<d>` 以外的中文会被 H3 当台词念出来（`h3-tuning.md` §1.3.1）。
 
 | 小节 | 必须写 | 例子 |
 |---|---|---|
