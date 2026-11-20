@@ -13,6 +13,16 @@ name: dsh
 # the container wherever compose puts it.
 
 x-dsh-image: &dsh-image
+  # The image name is the GHCR one, and the same name is what a local build
+  # produces. That is deliberate: `docker compose pull` fetches the CI-built
+  # image (built by .github/workflows/build-image.yml, one tag per dsh release)
+  # and `docker compose build` produces a byte-for-byte alternative under the
+  # identical name, so nothing downstream has to know which path was used.
+  #
+  # Override DSH_IMAGE to point at a mirror, a fork, or a private registry.
+  # ⚠️ GHCR packages start PRIVATE even when the repository is public: run
+  # `docker login ghcr.io -u <user>` once, or flip the package to public in
+  # Settings -> Packages, otherwise pull answers 401/403.
   build:
     context: .
     args:
@@ -32,7 +42,7 @@ x-dsh-image: &dsh-image
       # C++ itself. See README 「原生编译工具链 + CUDA（可选）」.
       INSTALL_CUDA: ${INSTALL_CUDA:-0}
       CUDA_VERSION: ${CUDA_VERSION:-13.0}
-  image: dsh:${DSH_VERSION:-0.2.2-rc.5}
+  image: ${DSH_IMAGE:-ghcr.io/zjwan461/dsh-docker}:${DSH_VERSION:-0.2.2-rc.5}
 
 services:
   dsh:

@@ -796,15 +796,23 @@ newest=true (highest tag: 0.2.2-rc.5, building 0.2.2-rc.5)
 
 > ⚠️ **GHCR 的包默认是私有的**，即使仓库是公开的。要在别的机器上免登录 `docker pull`：仓库页 → **Packages** → 选中该镜像 → *Package settings* → **Change visibility → Public**。保持私有的话，拉取前先 `echo $GITHUB_TOKEN | docker login ghcr.io -u <你的用户名> --password-stdin`（token 需要 `read:packages`）。
 
-**用 CI 产出的镜像替换本地构建**（不改 compose.yaml 的最省事做法）：
+**compose 默认就用这个镜像**。`compose.yaml` 里写的是：
 
-```bash
-docker pull ghcr.io/zjwan461/dsh-docker:0.2.2-rc.5
-docker tag  ghcr.io/zjwan461/dsh-docker:0.2.2-rc.5 dsh:0.2.2-rc.5   # 对上 compose 里的 image: 名
-docker compose up -d --no-build
+```yaml
+image: ${DSH_IMAGE:-ghcr.io/zjwan461/dsh-docker}:${DSH_VERSION:-0.2.2-rc.5}
 ```
 
-也可以把 compose 里的 `build:` 段整段删掉、把 `image:` 改成 `ghcr.io/zjwan461/dsh-docker:${DSH_VERSION:-0.2.2-rc.5}`，之后 `docker compose pull && docker compose up -d`。
+所以两条路都通，而且落到同一个名字上：
+
+```bash
+# A) 直接用 CI 产出的镜像（不本地构建）
+docker compose pull && docker compose up -d
+
+# B) 本地构建（build 段还在，产出的镜像名与 A 完全一致）
+docker compose build dsh && docker compose up -d
+```
+
+想指向镜像站/自己的 fork，改 `.env` 的 `DSH_IMAGE` 即可，不用动 compose.yaml。
 
 **几件值得知道的事**
 
