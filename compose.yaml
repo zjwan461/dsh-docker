@@ -80,6 +80,11 @@ services:
       # Empty value => no --trusted-host flag => browser accesses get 403.
       DSH_TRUSTED_HOSTS: ${DSH_TRUSTED_HOSTS:-}
       DSH_TELEMETRY_DISABLED: ${DSH_TELEMETRY_DISABLED:-1}
+      # Where the GUI creates its first-use Workspace. dsh 0.2.2 asks the OS for
+      # the account's Documents directory (xdg-user-dir on Linux) and this image
+      # has neither that binary nor a useful answer, so the entrypoint pins the
+      # controller to this path instead. Must be the mounted workspace volume.
+      DSH_WORKSPACES_DIR: ${DSH_WORKSPACES_DIR:-/workspaces}
       # The caddy service clears its proxy variables entirely; this one needs
       # external egress (model endpoints), so it only bypasses the private ranges.
       # Without this, Docker's injected HTTP(S)_PROXY also catches requests to

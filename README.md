@@ -602,7 +602,55 @@ const ANCHOR = /(isLoopback:\s*)transport\?\.ownsHost\s*===\s*true\s*\|\|\s*page
 
 已验证：对 0.2.1-rc.5 和 0.2.2-rc.5 的 `lib/client.browser.js` 各命中 **1 次**，改写后 `node --check` 通过，`--check` 复检返回 0。**这一项仍然是必需的**——0.2.2 的 `dsh-client-ui-settings-general` 里那句 `isLoopback ? new SettingsDocumentStore(...) : void 0` 原样保留。
 
-### 3. 检查过但**不需要**改的
+### 3. 首个工作空间：0.2.2 新增，容器里必然失败
+
+0.2.2 引入了「首个工作空间」（first-use Workspace）：GUI 第一次打开时自动建一个默认项目目录。它建在**账号的「文档」目录**下，而这个目录在容器里根本取不到。
+
+`@deepseek-ai/dsh-api-workspace-controller/lib/default-directory.js`：
+
+```js
+switch (platform) {
+  case 'linux':
+    ({ stdout } = await run('xdg-user-dir', ['DOCUMENTS'], signal, 'hidden'));
+    break;
+  ...
+}
+directory = stdout.replace(/[\r\n]+$/, '');
+// XDG reports the home directory when this user directory is disabled.
+if (directory === '' || (platform === 'linux' && paths.normalize(directory) === (internals.home ?? homedir()))) {
+  throw new Error('system Documents directory is unavailable');
+}
+...
+return paths.join(directory, 'deepseek-harness', DEFAULT_WORKSPACE_DIRECTORY);   // 'default-workspace'
+```
+
+两个死结，`python:3.11-slim-bookworm` 一个不落地都踩中：
+
+1. **没装 `xdg-user-dir`**（属于 `xdg-user-dirs` 包）→ 命令直接失败 → 抛错；
+2. 即便装了，容器里没有 `~/.config/user-dirs.dirs`，`xdg-user-dir DOCUMENTS` 返回的就是 `$HOME`（`/home/node`），而代码**显式拒绝**等于 home 的答案。
+
+于是 GUI 弹「无法创建默认工作空间」，目录选择器退回到 `/home/node` —— 也就是你看到的两个症状，同一个根因。
+
+**本仓库的修法**：不装包、不猜 OS，直接把控制器钉在挂载卷上。entrypoint 生成的覆盖层多了一行：
+
+```yaml
+- id: workspace-controller
+  config:
+    documentsDirectory: /workspaces      # 由 DSH_WORKSPACES_DIR 决定
+    documentsLookupTimeoutMs: 10000
+```
+
+`documentsDirectory` 是上游公开的部署覆盖项（`Config.documentsDirectory`，注释就写着 *"explicit deployment override for the system Documents directory"*），设了就不再走 OS 查询。GUI 仍会追加它自己的两段固定名字，所以最终目录是：
+
+```
+/workspaces/deepseek-harness/default-workspace
+```
+
+在卷上、属运行 uid、跨容器重建不变。entrypoint 会先 `mkdir -p` 并检查可写，日志里也会打印这行路径；覆盖层自检多了一条 `documentsDirectory` 的 grep，防止行 id 写错时补丁静默失效。
+
+**目录选择器仍从 `/home/node` 开始** —— 这是上游行为，`dsh-host-directory-picker-browse` 里写死 `resolve(path ?? homedir())`，没有配置项。镜像因此在 `/home/node/workspaces` 放了一个指向 `/workspaces` 的软链：选择器会列出并 stat 软链（`directoryRow` 用 `stat().isDirectory()` 判定可进入），所以首页列表里一眼就能点进卷。**这是便利，不是修复** —— 真正的修复是上面那条 `documentsDirectory`。
+
+### 4. 检查过但**不需要**改的
 
 | 检查项 | 结论 |
 |---|---|
@@ -615,7 +663,7 @@ const ANCHOR = /(isLoopback:\s*)transport\?\.ownsHost\s*===\s*true\s*\|\|\s*page
 
 新增的 `dsh-cua-bundle` / `dsh-official-bundles` / `dsh-deepseek-chat-import` / `dsh-experimental-liveshare` / `dsh-experimental-forge-bundle` / `dsh-personalized-recommendations` 是 CLI 自己的依赖，构建期的 `--dump-config` 会替我们验证整棵树能组合出来。
 
-### 4. 升级动作
+### 5. 升级动作
 
 ```bash
 # 1) 版本号（Dockerfile 的 ARG 默认值、compose 的回退值、.env.example 都已同步，只需确认）
@@ -626,6 +674,8 @@ docker compose up -d
 ```
 
 `data/dsh`（`$DSH_HOME`）不用清：0.2.2 的 profile 结构与 0.2.1 相同，仍然不投影安装树，登录 cookie 和会话库都留着。
+
+**首个工作空间只在注册表为空时创建**（`initializeDefault` 的前提），所以从 0.2.1 升上来的实例不会多出一个工作空间；只有全新 home 才会看到 `/workspaces/deepseek-harness/default-workspace`。
 
 ## 升级到 0.2.1-rc.2
 
@@ -846,6 +896,7 @@ docker compose build dsh && docker compose up -d
 
 | 现象 | 原因与处理 |
 |---|---|
+| GUI 提示**无法创建默认工作空间**，或新建工作空间的目录选择器停在 `/home/node` | 0.2.2 的首个工作空间建在账号「文档」目录下，而容器里取不到：镜像没装 `xdg-user-dir`，且上游显式拒绝等于 `$HOME` 的答案。本镜像已用覆盖层把 `workspace-controller` 的 `documentsDirectory` 钉到 `/workspaces`，默认目录因此是 `/workspaces/deepseek-harness/default-workspace`。**如果仍然报错**：<br>`docker compose logs dsh \| grep -i 'first-use workspace\|documentsDirectory'` —— 正常应看到 `first-use workspace: /workspaces/deepseek-harness/default-workspace` 和 `first-use workspace directory verified`。<br>出现 `does not report 'documentsDirectory'` ⇒ 覆盖层的行 id 与上游不匹配（升级到更新版本时可能改名），按 README「升级到 0.2.2-rc.5」第 3 节核对 `workspace-controller` 这个 id。<br>没有这两行、或容器是旧镜像 ⇒ `docker compose pull && docker compose up -d --force-recreate`。<br>`/workspaces` 不可写（bind mount 属主不对）时 entrypoint 会给 WARNING，宿主上 `sudo chown -R 1000:1000 <workspaces 宿主目录>`。 |
 | **模型调用失败 / 一直转圈**（走内网 vLLM、LiteLLM 之类的自建端点时） | 头号嫌疑是**代理把内网请求也劫持走了**：容器里被注入了 `HTTP_PROXY`，而 `~/.docker/config.json` 的 `noProxy` 只列了 `172.17.0.0/16`、`192.168.*`、`.corp.local`。若端点地址是 `10.x.x.x`，请求就被送到代理 → 失败。对照验证：<br>`docker compose exec -T dsh curl --noproxy '*' -s -o /dev/null -w '%{http_code}\n' --max-time 8 http://<端点>:端口/v1/models -H "Authorization: Bearer $KEY"`<br>去掉 `--noproxy '*'` 再跑一次；**两次结果不一致就确认是代理**。<br>本 compose 现在给 dsh 服务默认设了 `NO_PROXY=127.0.0.1,localhost,172.16.0.0/12`（容器地址、compose 网络、healthcheck 都靠它），这只覆盖私网段；**`10.x.x.x` / 自定义域名不在里面**，要加就设 `.env` 的 `DSH_NO_PROXY`（例如 `127.0.0.1,localhost,172.16.0.0/12,10.0.0.0/8`），或在 `~/.docker/config.json` 的 `noProxy` 里补。<br>次要嫌疑：容器里写 `localhost` 到不了宿主机——用宿主局域网 IP，或给 dsh 服务加 `extra_hosts: ["host.docker.internal:host-gateway"]`（已默认加）。 |
 | 浏览器**没有**「继续访问」按钮 | 受管 Chrome/Edge 的 `SSLErrorOverrideAllowed=false` 策略会彻底禁用跳过证书错误。打开 `chrome://policy` 搜 `SSLErrorOverrideAllowed`：若为 false，点击继续这条路走不通，只能导入 CA（Option A）或改用 CA 证书（Option B）。 |
 | 以前能点击继续，某天突然进不去且没有绕过选项 | HSTS 生效了。浏览器**不会**从证书错误的连接记录 HSTS，所以只要证书一直不受信任，「继续」就一直可用；但一旦导入过 CA（连接变合法），该域名就被写入 HSTS，此后证书再出问题就没有「继续」按钮了。清除方法：Chrome/Edge → `chrome://net-internals/#hsts` → "Delete domain security policies" 输入 `dsh.example.com`；Firefox → 设置里清除该站点数据。 |

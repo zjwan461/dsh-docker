@@ -891,7 +891,23 @@ RUN set -eux; \
 # `docker run`.
 RUN groupadd --gid "${DSH_GID}" node 2>/dev/null || true; \
     useradd --uid "${DSH_UID}" --gid "${DSH_GID}" --create-home --shell /bin/bash node 2>/dev/null || true; \
-    chown -R "${DSH_UID}:${DSH_GID}" /data/dsh /workspaces
+    chown -R "${DSH_UID}:${DSH_GID}" /data/dsh /workspaces; \
+    mkdir -p /home/node; \
+    ln -sfn /workspaces /home/node/workspaces
+#
+# That symlink exists for the GUI's directory picker, which opens at the
+# account's home directory and has no configurable start path upstream
+# (`dsh-host-directory-picker-browse` resolves `path ?? homedir()`). In a
+# container the home directory holds nothing the user wants, while the volume
+# they actually work in is one level away at /workspaces. A symlink is enough:
+# the picker lists symbolic links and stats them to decide whether they can be
+# entered (directoryRow -> stat().isDirectory()), so `workspaces` shows up in
+# the first listing and opens the volume in one click.
+#
+# Note this is a convenience, not the fix for the first-use Workspace: that one
+# is the entrypoint's `documentsDirectory` overlay, which decides where the
+# automatic default workspace is created.
+
 USER ${DSH_UID}:${DSH_GID}
 
 WORKDIR /workspaces
