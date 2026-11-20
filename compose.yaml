@@ -16,7 +16,7 @@ x-dsh-image: &dsh-image
   build:
     context: .
     args:
-      DSH_VERSION: ${DSH_VERSION:-0.2.1-rc.5}
+      DSH_VERSION: ${DSH_VERSION:-0.2.2-rc.5}
       DSH_UID: ${DSH_UID:-1000}
       DSH_GID: ${DSH_GID:-1000}
       # Optional image layers. The first three default to 1 (installed); set them
@@ -32,7 +32,7 @@ x-dsh-image: &dsh-image
       # C++ itself. See README 「原生编译工具链 + CUDA（可选）」.
       INSTALL_CUDA: ${INSTALL_CUDA:-0}
       CUDA_VERSION: ${CUDA_VERSION:-13.0}
-  image: dsh:${DSH_VERSION:-0.2.1-rc.5}
+  image: dsh:${DSH_VERSION:-0.2.2-rc.5}
 
 services:
   dsh:

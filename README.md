@@ -12,7 +12,7 @@
 - 宿主机只需一个端口要放通、要保证空闲;
 - Caddy 的内部 CA 对**所有**主机名只有**一个根证书**,浏览器只做**一次**信任决定。
 
-`dsh` 是唯一的服务：**Web GUI**，entrypoint 是 `dsh-entrypoint`，最终 exec `dsh web`。镜像基于 `python:3.11-slim-bookworm` + NodeSource 的 Node 22（glibc；**不要换 Alpine**，musl 下 `node-pty` 会退化成源码编译）。
+`dsh` 是唯一的服务：**Web GUI**，entrypoint 是 `dsh-entrypoint`，最终 exec `dsh web`。镜像基于 `python:3.11-slim-bookworm` + NodeSource 的 **Node 24**（0.2.2 起 dsh 自己要求 `>=24.9.0`；glibc；**不要换 Alpine**，musl 下 `node-pty` 会退化成源码编译）。
 
 ### 为什么不加 nginx（架构决定，勿重复讨论）
 
@@ -21,13 +21,13 @@ Caddy 已经同时承担了**域名虚拟主机、TLS 终结、反向代理**三
 - **想用 CA 的证书**：不需要 nginx，走下面的 Option B，把证书文件喂给 Caddy 即可。证书由谁签发 ≠ 必须由谁托管。
 - **只有一种情况值得引入 nginx**：TLS 必须在**集中入口**（已有的 nginx / F5 / LB）终结。那时的正确做法是**把 compose 里的 caddy 服务整个删掉**，让 nginx 直接反代 dsh，而不是两层叠加。届时必须做到五件事：`proxy_set_header Host $host`（nginx 默认是 `$proxy_host`，会导致 /api 信任围栏 403）、`proxy_buffering off`（SSE）、WebSocket upgrade 头、`client_max_body_size` 提到 300m 以上（否则上传 413）、以及明文那一跳只允许走 loopback 或 compose 内网。
 
-## 为什么是这样设计的（都是对着 `@deepseek-ai/dsh` 的 0.2.1-rc.2 源码核过的；0.1.5-rc.x / 0.2.0-rc.x 的结论仍然有效）
+## 为什么是这样设计的（都是对着 `@deepseek-ai/dsh` 的 0.2.2-rc.5 源码核过的；0.1.5-rc.x / 0.2.0-rc.x / 0.2.1-rc.x 的结论仍然有效）
 
-> 版本基线：本仓库已适配 **0.2.1-rc.2**，当前固定的发布号是 **0.2.1-rc.5**（见 `.env.example`；同一 0.2.1 线，适配结论通用）。0.2.1 改了六处**会直接影响本部署**的东西——profile 不再向 `$DSH_HOME` 投影安装树、设置页改为走 `remote.settings`、客户端 bundle 从 `lib/client.js` 拆成 `lib/client.browser.js`、`webserver` 行的 config 多了 `tls`、**该行不再接受 `0.0.0.0`**、**`.credentials.yaml` 必须 owner-only**——外加「依赖全部精确锁版」这一项顺带简化。逐条差异与升级动作见「[升级到 0.2.1-rc.2](#升级到-021-rc2)」。
+> 版本基线：本仓库已适配 **0.2.2-rc.5**（见 `.env.example`）。从 0.2.1 线跨到 0.2.2 线只有**两处**会影响本部署，但第一处是硬的：**Node 下限从 22.19 提到 24.9.0**（`@deepseek-ai/dsh` 自己声明，不再是 `libreoffice-kit` 间接要求），镜像因此换到 Node 24；第二处是客户端 bundle 被压得更紧、**运算符两侧的空格没了**，让设置页补丁的锚点匹配不上。0.2.1 的六处影响（profile 不再投影安装树、设置页走 `remote.settings`、客户端 bundle 拆成 `lib/client.browser.js`、`webserver` 行多出 `tls`、**该行不接受 `0.0.0.0`**、**`.credentials.yaml` 必须 owner-only**）继续有效。逐条差异与升级动作见「[升级到 0.2.2-rc.5](#升级到-022-rc5)」。
 
 | 事实 | 由此产生的设计 |
 |---|---|
-| CLI 依赖 `commander@15`（`>=22.12`），且 0.2.1-rc.2 的 `@deepseek-ai/libreoffice-kit` engines 为 `>=22.19.0` | Node 必须 ≥ 22.19，故用 NodeSource 在 Debian glibc 基线上装 Node 22；**构建期断言**这个下限 |
+| **0.2.2-rc.5 的 `@deepseek-ai/dsh` 自己声明 `engines.node >= 24.9.0`**（0.2.1 只是间接依赖 `libreoffice-kit` 要求 `>=22.19`） | Node 必须 ≥ 24.9，故用 NodeSource 装 **Node 24**（`ARG NODE_MAJOR=24`）；**构建期断言**这个下限。npm 对 engines 默认只警告不报错，不在这里拦就会带着 22.x 构建成功、运行时才出错 |
 | `node-pty` 自带 `prebuilds/linux-x64`，`sharp`/`ripgrep`/`landlock-run` 都是预编译 npm 包 | 镜像里不需要 gcc/python-dev；**不要用 Alpine**（musl 下 `node-pty` 会退化成源码编译） |
 | Linux 沙箱链是 `bwrap → Landlock`，按顺序探测，两者都不可用则 fail closed（`SANDBOX_UNAVAILABLE`） | 镜像**故意不装 bubblewrap**，让容器稳定落到无需任何特权的 Landlock |
 | `dsh web --host 0.0.0.0` 被 CLI 拒绝；**0.2.1 起连 `webserver` 行的 `host` 也拒通配地址**（只接受具体 IPv4/IPv6 字面量，主机名也不行），而且这个校验只在插件激活时跑，`--dump-config` 看不出来 | 用 `--patch` 覆盖层把 `webserver` 行的 `host` 改成**容器自己的 IPv4**（entrypoint 每次启动探测，写进 `/data/dsh/.runtime/bind-host` 供 healthcheck 与 `verify.sh` 使用）；caddy 用 `dsh:<port>` 按名字连，自动跟上。**该行的 `config` 在 0.2.1 还多了一个 `tls`，覆盖层必须一并重述**，否则命令行给的 `--tls-cert/--tls-key` 会被静默丢掉 |
@@ -56,7 +56,7 @@ Caddy 已经同时承担了**域名虚拟主机、TLS 终结、反向代理**三
 | `patch-client-settings.mjs` | 给浏览器 bundle 打补丁，让域名访问时 General 设置页仍能操作宿主设置文档（见「设置页为什么现在能用」）。**构建期以 root 应用、随后 `--check` 复核**——它改的文件在 root 所有的 npm 全局安装树里，0.2.1 起 profile 里连符号链接副本都没有了，运行时 uid 无论怎么写都只能 EACCES。entrypoint 每次启动再 `--check` 一次 |
 | `workspaces/` | 工作区 bind mount 源目录 |
 | `skills/` | 内置（bundled）技能目录；构建时 COPY 到镜像 `/opt/dsh-skills`。**目前故意为空**，机制已就绪 |
-| `.github/workflows/build-image.yml` | GitHub Actions：lint + 构建镜像并推 GHCR（版本取自 `.env.example`，PR 只构建不推送）。见「用 GitHub Actions 构建镜像」 |
+| `.github/workflows/build-image.yml` | GitHub Actions：lint + 构建镜像推 GHCR + **打 `v<DSH_VERSION>` tag** + **建 GitHub Release**（版本取自 `.env.example`，PR 只构建不推送，`latest` 只在版本最高时移动）。见「用 GitHub Actions 构建镜像」 |
 | `docs/openshift-deployment.md` | **OpenShift 部署手册**：去掉 Caddy、由 Router 做 TLS 与入口，含 PVC/SCC/Route/长连接/沙箱排障。清单在 `docs/openshift/`（`oc apply -k docs/openshift`） |
 | `LICENSE` | Apache License 2.0 全文（与官方文本逐字节一致） |
 
@@ -555,6 +555,78 @@ docker compose logs caddy | grep -i -E 'certificate|obtain|error'
 - 白名单判的是**客户端出口 IP**：验证必须从客户端做 ✔（在服务器上 curl 会经 docker 网桥，得到 403 属正常）
 - **HSTS 只对域名生效**：用 IP 访问时两条路可长期并存；若以后改用域名，一旦 HTTPS 访问成功，浏览器会把 `http://域名` 强制升级一年 ⇒ 明文那条路消失（Caddyfile 里 HSTS 头旁边也写了）
 
+## 升级到 0.2.2-rc.5
+
+本仓库从 **0.2.1-rc.5** 适配到 **0.2.2-rc.5**。这一版对上游是个大版本（CLI 加了 6 个新依赖、去掉 1 个），但对本部署**只有两处**需要动，其中一处是硬性门槛。
+
+### 1. Node 下限 22.19 → **24.9.0**（必须换 Node）
+
+上游把 `engines.node` 从「由 `@deepseek-ai/libreoffice-kit` 间接要求 `>=22.19.0`」改成 **`@deepseek-ai/dsh` 自己声明 `>=24.9.0`**：
+
+```console
+$ npm view @deepseek-ai/dsh@0.2.1-rc.5 engines     # 无输出：0.2.1 的 CLI 自己不声明
+$ npm view @deepseek-ai/dsh@0.2.2-rc.5 engines
+{ node: '>=24.9.0' }
+```
+
+**这条不会让构建失败**，这正是它危险的地方：npm 对 `engines` 默认只打 WARN，装着 22.x 照样装成功、`--dump-config` 也可能过，问题留到运行时。所以镜像这边做了两件事：
+
+- `ARG NODE_MAJOR=22` → **`24`**（NodeSource `setup_24.x`，当前提供 24.22.3）；
+- 构建期断言从 `>=22.19` 改成 **`>=24.9`**，按 `(major, minor)` 数值比较，而不是字符串比较。
+
+```dockerfile
+# Dockerfile
+ARG NODE_MAJOR=24
+...
+RUN curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" ... \
+ && node -e 'const [major, minor] = process.versions.node.split(".").map(Number);
+      if (major < 24 || (major === 24 && minor < 9)) { ...exit 1 }'
+```
+
+### 2. 客户端 bundle 被重新压缩，设置页补丁的锚点失配（你遇到的失败）
+
+`patch-client-settings.mjs` 锚的是 `isLoopback` 的整个三元表达式。0.2.1 的 bundle 是带空格发布的，0.2.2-rc.5 换了个更紧的压缩器，**语义没变、空格全没了**：
+
+```js
+// 0.2.1-rc.5（带空格，旧锚点能匹配）
+isLoopback: transport?.ownsHost === true || pageLocation === void 0 || isLoopbackHostname(pageLocation.hostname),
+// 0.2.2-rc.5（无空格，旧锚点匹配不上 → 构建在第 19 层失败）
+isLoopback:transport?.ownsHost===true||pageLocation===void 0||isLoopbackHostname(pageLocation.hostname),
+```
+
+修法是把锚点里**每个运算符两侧都写成 `\s*`**，这样同一份锚点同时服务两个版本，且不削弱匹配强度（标识符、运算符、操作数顺序仍然必须一致）：
+
+```js
+const ANCHOR = /(isLoopback:\s*)transport\?\.ownsHost\s*===\s*true\s*\|\|\s*pageLocation\s*===\s*void 0\s*\|\|\s*isLoopbackHostname\(\s*pageLocation\.hostname\s*\)(,)/g;
+```
+
+已验证：对 0.2.1-rc.5 和 0.2.2-rc.5 的 `lib/client.browser.js` 各命中 **1 次**，改写后 `node --check` 通过，`--check` 复检返回 0。**这一项仍然是必需的**——0.2.2 的 `dsh-client-ui-settings-general` 里那句 `isLoopback ? new SettingsDocumentStore(...) : void 0` 原样保留。
+
+### 3. 检查过但**不需要**改的
+
+| 检查项 | 结论 |
+|---|---|
+| `exports["./client"]` 是否还指向 `lib/client.browser.js` | 是，两版相同 |
+| `bin` 是否还是 `lib/bin.js`、`--dump-config` 是否还在 | 是 |
+| `dsh-base` / `dsh-web-app` 是否还在依赖里（web profile 的组合前提） | 是 |
+| 自带插件的三个注入目标（`dsh-client-ui-deliverables` / `sidebar-documentpreview` / `layout` / `settings`） | 0.2.2-rc.5 都在 |
+| `@deepseek-ai/dsh-session-title-llm@0.2.2-rc.5` | 存在，Dockerfile 的显式安装继续有效 |
+| 自带插件对宿主 API 的依赖 | 只 `require('react')`，由宿主 bundle loader 提供，未变 |
+
+新增的 `dsh-cua-bundle` / `dsh-official-bundles` / `dsh-deepseek-chat-import` / `dsh-experimental-liveshare` / `dsh-experimental-forge-bundle` / `dsh-personalized-recommendations` 是 CLI 自己的依赖，构建期的 `--dump-config` 会替我们验证整棵树能组合出来。
+
+### 4. 升级动作
+
+```bash
+# 1) 版本号（Dockerfile 的 ARG 默认值、compose 的回退值、.env.example 都已同步，只需确认）
+grep -n 'DSH_VERSION' .env .env.example | head
+# 2) 重建（Node 换了大版本，registry.npmjs.org 与 deb.nodesource.com 都要能出网）
+docker compose build dsh
+docker compose up -d
+```
+
+`data/dsh`（`$DSH_HOME`）不用清：0.2.2 的 profile 结构与 0.2.1 相同，仍然不投影安装树，登录 cookie 和会话库都留着。
+
 ## 升级到 0.2.1-rc.2
 
 本仓库从 **0.2.0-rc.2** 适配到 **0.2.1-rc.2**。上游这一版动了六处会影响本部署的东西（外加一项顺带简化），下面按「症状 → 本仓库怎么处理」列清楚，便于你 review 和以后升级时复用这套方法。
@@ -700,14 +772,25 @@ docker compose exec dsh dsh plugin --profile web remove <package>
 
 | 事件 | 行为 |
 |---|---|
-| push 到 `main`（且改到 Dockerfile / entrypoint / plugins / skills / compose 等构建输入） | 构建 + 推送 `:<DSH_VERSION>`、`:latest`、`:sha-xxxxxxx` |
-| 打 `v*` tag | 构建 + 推送 `:<DSH_VERSION>`、tag 名、`:sha-…` |
+| push 到 `main`（且改到 Dockerfile / entrypoint / plugins / skills / compose 等构建输入） | 构建 + 推送镜像 → **打 git tag `v<DSH_VERSION>`** → **建 GitHub Release** |
 | Pull Request | **只构建，不推送**（不登录 registry），并把镜像 load 进 runner 做一次版本自检 |
-| Actions → Run workflow | 手动：可覆盖 dsh 版本、选 `full`/`slim` 层、选是否构建 arm64、选是否推送 |
+| Actions → Run workflow | 手动：可覆盖 dsh 版本、选 `full`/`slim` 层、选是否构建 arm64、选是否推送（**不会**发版） |
 
-**版本来源**：`.env.example` 的 `DSH_VERSION`（当前 `0.2.1-rc.5`）。手动触发时可以填别的值；workflow 不自己发明版本，所以仓库里那一个数字仍然是唯一事实来源。`Dockerfile` / `compose.yaml` 的默认值与之保持一致。
+> 刻意**没有**监听 `v*` tag push：tag 是 release job 自己打的，如果再监听 tag，每发一次版就会多跑一遍同样提交的 20 分钟构建。要重建某个已发布版本，用 `workflow_dispatch` 传 `dsh_version`。
 
-**产物**：`ghcr.io/zjwan461/dsh-docker:<DSH_VERSION>`。查看 `Run workflow` 的 job summary 会列出本次所有 tag 与各层开关。
+**版本与发版规则**：dsh 官方发布 `0.2.2-rc.5`，本仓库的 tag 就是 `v0.2.2-rc.5`、Release 标题是 `dsh 0.2.2-rc.5`、镜像 tag 是 `:0.2.2-rc.5`——三者同号。唯一事实来源是 `.env.example` 的 `DSH_VERSION`；`Dockerfile` 的 `ARG` 默认值与 `compose.yaml` 的回退值跟着它，workflow 不自己发明版本。
+
+**`latest` 不是无条件的**：只有当本次构建的版本是**本仓库已打过 tag 里的最高版本**时，`:latest` 才会移动。这样重建旧版本（热修、回滚）不会把 `latest` 拖回去。判断用 `git ls-remote --tags` + `sort -V`（`0.2.2-rc.10` 正确地排在 `0.2.2-rc.5` 之后）：
+
+```console
+newest=true (highest tag: 0.2.2-rc.5, building 0.2.2-rc.5)
+```
+
+**发版是幂等的**：release job 先查 `v<version>` 是否已存在，存在就什么都不做。所以同一个版本重复推 `main` 不会分叉出第二个 tag，也不需要手工清。
+
+**产物**：`ghcr.io/zjwan461/dsh-docker:<DSH_VERSION>`、`:latest`（仅当最新）、`:sha-xxxxxxx`。`Run workflow` 的 job summary 会列出本次所有 tag、各层开关，以及 `newest` 的判定结果。
+
+**Release 内容**：`gh release create` 自动生成，含 `docker pull` 命令、本次镜像的 tag 说明、镜像内部构成（Node 24 / 基础镜像 / 沙箱 / 插件 / 构建期闸门）。带 `-rc` 的版本会被标成 **pre-release**，不会占掉 GitHub 的 "Latest" 标识。
 
 **不需要配置任何 secret**：推送用 `GITHUB_TOKEN`（`permissions: packages: write` 已在 workflow 里声明）。仓库的 Settings → Actions → General 保持默认的 *Read and write permissions* 即可；若被改成只读，workflow 会在登录那一步失败，把该 job 的 `permissions` 提权或调整仓库设置即可。
 
@@ -716,12 +799,12 @@ docker compose exec dsh dsh plugin --profile web remove <package>
 **用 CI 产出的镜像替换本地构建**（不改 compose.yaml 的最省事做法）：
 
 ```bash
-docker pull ghcr.io/zjwan461/dsh-docker:0.2.1-rc.5
-docker tag  ghcr.io/zjwan461/dsh-docker:0.2.1-rc.5 dsh:0.2.1-rc.5   # 对上 compose 里的 image: 名
+docker pull ghcr.io/zjwan461/dsh-docker:0.2.2-rc.5
+docker tag  ghcr.io/zjwan461/dsh-docker:0.2.2-rc.5 dsh:0.2.2-rc.5   # 对上 compose 里的 image: 名
 docker compose up -d --no-build
 ```
 
-也可以把 compose 里的 `build:` 段整段删掉、把 `image:` 改成 `ghcr.io/zjwan461/dsh-docker:${DSH_VERSION:-0.2.1-rc.5}`，之后 `docker compose pull && docker compose up -d`。
+也可以把 compose 里的 `build:` 段整段删掉、把 `image:` 改成 `ghcr.io/zjwan461/dsh-docker:${DSH_VERSION:-0.2.2-rc.5}`，之后 `docker compose pull && docker compose up -d`。
 
 **几件值得知道的事**
 

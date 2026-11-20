@@ -17,11 +17,14 @@
 #     the official node image ALREADY has a uid-1000 `node` user (that leaves the
 #     runtime uid with no writable $HOME whenever DSH_UID != 1000).
 #
-#   * Node.js 22 comes from NodeSource. Node >= 22.19 is mandatory in 0.2.1-rc.2:
-#     `@deepseek-ai/libreoffice-kit` (pulled in by the web profile) declares
-#     engines.node ">=22.19.0", and commander@15 needs >= 22.12. NodeSource's
-#     22.x line is past both, and the build asserts the version instead of
-#     trusting that.
+#   * Node.js 24 comes from NodeSource. Node >= 24.9.0 is mandatory in
+#     0.2.2-rc.5: `@deepseek-ai/dsh` itself declares engines.node ">=24.9.0"
+#     (0.2.1 only needed >= 22.19, from @deepseek-ai/libreoffice-kit). This is
+#     the single biggest requirement change between the two releases, and it is
+#     not a soft warning: 0.2.2's published code uses Node 24-era APIs, so a
+#     22.x image installs cleanly and then misbehaves at runtime. NodeSource's
+#     24.x line currently ships 24.22.3, comfortably past the floor, and the
+#     build asserts the version instead of trusting that.
 #
 #   * bubblewrap is deliberately NOT installed. On Linux the sandbox chain is
 #     ["bwrap", "landlock"] and is probed in that order; bwrap inside a
@@ -32,12 +35,12 @@
 #     is loud, never silent.
 #
 # Build (context is the repository root):
-#   docker build -t dsh:0.2.1-rc.5 .
+#   docker build -t dsh:0.2.2-rc.5 .
 
 FROM python:3.11-slim-bookworm
 
-ARG NODE_MAJOR=22
-ARG DSH_VERSION=0.2.1-rc.5
+ARG NODE_MAJOR=24
+ARG DSH_VERSION=0.2.2-rc.5
 ARG DSH_UID=1000
 ARG DSH_GID=1000
 # Absolute path of the npm dsh CLI entry file. Deliberately NOT set here: the
@@ -465,22 +468,27 @@ RUN set -eux; \
 # /usr/local/cuda-13.0/bin.
 ENV PATH="/usr/local/cuda/bin:${PATH}"
 
-# ── Node.js 22 ──────────────────────────────────────────────────────────────
+# ── Node.js 24 ──────────────────────────────────────────────────────────────
 # The NodeSource setup script imports its signing key itself (dearmor), so no
 # gnupg package is required on the image.
 #
-# The version assertion is not decoration. 0.2.1-rc.2 pulls
-# `@deepseek-ai/libreoffice-kit` into the web profile, whose engines field is
-# ">=22.19.0"; on an older 22.x the profile still composes but that package's
-# code (and anyone reading its engines field) disagrees with the runtime. Assert
-# the floor here, where the failure is one line instead of a plugin error later.
+# The version assertion is not decoration. 0.2.2-rc.5 raises the floor from
+# 22.19 (0.2.1's @deepseek-ai/libreoffice-kit) to 24.9.0 — the `@deepseek-ai/dsh`
+# CLI itself now declares engines.node ">=24.9.0". npm only WARNS about engines
+# by default, so an image built on 22.x installs the tree happily and then fails
+# at runtime in ways the build log never explains. Assert the floor here, where
+# the failure is one line.
+#
+# The check compares (major, minor) as numbers rather than as strings: "24.9"
+# must not be considered satisfied by "24.10" only by luck of lexicographic
+# ordering.
 RUN curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" -o /tmp/nodesource_setup.sh \
  && bash /tmp/nodesource_setup.sh \
  && rm -f /tmp/nodesource_setup.sh \
  && apt-get install -y --no-install-recommends nodejs \
  && rm -rf /var/lib/apt/lists/* \
  && node --version \
- && node -e 'const [major, minor] = process.versions.node.split(".").map(Number); if (major < 22 || (major === 22 && minor < 19)) { console.error(`ERROR: node ${process.versions.node} is below the 22.19 floor this dsh release needs (@deepseek-ai/libreoffice-kit engines.node)`); process.exit(1); } console.log("node meets the 22.19 floor");'
+ && node -e 'const [major, minor] = process.versions.node.split(".").map(Number); if (major < 24 || (major === 24 && minor < 9)) { console.error(`ERROR: node ${process.versions.node} is below the 24.9 floor this dsh release needs (@deepseek-ai/dsh engines.node)`); process.exit(1); } console.log("node meets the 24.9 floor");'
 
 # ── dsh CLI + pnpm ──────────────────────────────────────────────────────────
 # pnpm is required because `dsh plugin --profile <name> <args>` forwards to it.
@@ -678,8 +686,8 @@ RUN set -eux; \
     done; \
     if [ -n "${mismatched}" ]; then \
       echo "ERROR: these packages are not at DSH_VERSION=${DSH_VERSION}:${mismatched}"; \
-      echo 'Every @deepseek-ai/dsh-* dependency in 0.2.1-rc.2 is an EXACT version, so a'; \
-      echo 'mismatch here means the install was mixed (a second copy from the global'; \
+      echo 'Every @deepseek-ai/dsh-* dependency in the pinned release is an EXACT version,'; \
+      echo 'so a mismatch here means the install was mixed (a second copy from the global'; \
       echo 'root, a stale node_modules layer, or a different DSH_VERSION in .env).'; \
       echo 'Rebuild without the npm cache: docker compose build --no-cache dsh'; \
       exit 1; \

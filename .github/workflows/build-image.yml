@@ -1,20 +1,37 @@
 # Build the dsh-docker image on GitHub Actions and publish it to GHCR.
 #
-#   push to main / v* tag   build + push   ghcr.io/<owner>/<repo>:<dsh version>
+#   push to main            build + push + tag + GitHub release
 #   pull request            build only (no push, no registry login needed)
 #   manual (workflow_dispatch)  build + optional push, optional arm64, full or slim
 #
-# The version comes from `.env.example`'s DSH_VERSION unless the manual trigger
-# overrides it, so the workflow never invents a version that the repository does
-# not actually pin. The Dockerfile's own build-time gates (Node floor, install-tree
-# assertion, settings patch --check, --dump-config, 60s boot smoke from an empty
-# home) run inside the build, so a green build already means "this image boots".
+# ── Versioning contract ─────────────────────────────────────────────────────
+# The dsh version in `.env.example`'s DSH_VERSION drives everything:
+#
+#   image tag   ghcr.io/<owner>/<repo>:<dsh version>   e.g. :0.2.2-rc.5
+#   git tag     v<dsh version>                          e.g. v0.2.2-rc.5
+#   release     titled "dsh <dsh version>"
+#
+# So a dsh release and its matching image share one number: when dsh publishes
+# 0.2.2-rc.5, this repository's release is v0.2.2-rc.5 and the image is
+# :0.2.2-rc.5. Nothing invents a version the repository does not pin.
+#
+# `latest` is NOT unconditional. It moves only when the version being built is
+# the highest one this repository has ever tagged — republishing an older
+# version (a hotfix rebuild, a revert) must not drag `latest` backwards.
+#
+# The workflow does not trigger on v* tag pushes on purpose: it CREATES the tag
+# itself in the release job, so a tag trigger would launch a duplicate
+# 20-minute build of the same commit every time a release is cut. To rebuild a
+# specific version, use workflow_dispatch with `dsh_version`.
+#
+# The Dockerfile's own build-time gates (Node floor, install-tree assertion,
+# settings patch --check, --dump-config, 60s boot smoke from an empty home) run
+# inside the build, so a green build already means "this image boots".
 name: build-image
 
 on:
   push:
     branches: [main]
-    tags: ['v*']
     paths:
       - Dockerfile
       - entrypoint.sh
@@ -196,6 +213,24 @@ jobs:
             *arm64*) smoke='240' ;;
           esac
 
+          # Is this the newest version this repository has ever released?
+          # `latest` follows the answer, so a rebuild of an older version (a
+          # hotfix, a revert) cannot drag the tag backwards.
+          #
+          # ls-remote lists tags without fetching any objects. The comparison is
+          # `sort -V` (GNU version sort), which orders 0.2.2-rc.10 after
+          # 0.2.2-rc.5 — a plain lexicographic sort would get that backwards.
+          # It ranks a final "0.2.2" and a "0.2.2-rc.5" by its own rules, which
+          # is close enough here: this repository only ever tags dsh versions as
+          # dsh publishes them.
+          newest='true'
+          tags="$(git ls-remote --tags --refs origin 'v*' 2>/dev/null | sed 's#.*refs/tags/v##' | tr -d '\r' || true)"
+          if [ -n "${tags}" ]; then
+            highest="$(printf '%s\n%s\n' "${tags}" "${version}" | grep -v '^$' | sort -V | tail -n1)"
+            if [ "${highest}" != "${version}" ]; then newest='false'; fi
+          fi
+          echo "newest=${newest} (highest tag: $(printf '%s\n' "${tags}" | grep -v '^$' | sort -V | tail -n1 || echo none), building ${version})"
+
           {
             echo "version=${version}"
             echo "image=${image}"
@@ -208,6 +243,7 @@ jobs:
             echo "cuda=${cuda}"
             echo "cuda_version=${cuda_version}"
             echo "smoke=${smoke}"
+            echo "newest=${newest}"
           } >> "$GITHUB_OUTPUT"
 
           echo "dsh ${version} -> ${image} [${platforms}] push=${push} layers=office:${office} chrome:${chrome} python:${python} smoke=${smoke}s"
@@ -240,10 +276,9 @@ jobs:
             org.opencontainers.image.version=${{ steps.cfg.outputs.version }}
           tags: |
             type=raw,value=${{ steps.cfg.outputs.version }}
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest,enable=${{ steps.cfg.outputs.push == 'true' && steps.cfg.outputs.newest == 'true' }}
             type=raw,value=${{ steps.cfg.outputs.version }}-slim,enable=${{ steps.cfg.outputs.office == '0' }}
             type=sha,format=short,prefix=sha-
-            type=ref,event=tag
 
       - name: Build and push
         uses: docker/build-push-action@v7
@@ -297,9 +332,116 @@ jobs:
             echo "| platforms | \`${{ steps.cfg.outputs.platforms }}\` |"
             echo "| pushed | \`${{ steps.cfg.outputs.push }}\` |"
             echo "| layers | office=\`${{ steps.cfg.outputs.office }}\` chrome=\`${{ steps.cfg.outputs.chrome }}\` python=\`${{ steps.cfg.outputs.python }}\` cuda=\`${{ steps.cfg.outputs.cuda }}\` (\`${{ steps.cfg.outputs.cuda_version }}\`) |"
+            echo "| newest release | \`${{ steps.cfg.outputs.newest }}\` (controls whether \`latest\` moves) |"
             echo
             echo "Tags:"
             echo '```'
             echo '${{ steps.meta.outputs.tags }}'
             echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Cut the release. Runs only for a push to main, i.e. exactly once per merged
+  # version bump, and only after the image built and pushed successfully — a
+  # release that exists but has no image behind its tag would be a lie.
+  #
+  # Idempotent by design: if v<version> already exists, this does nothing. That
+  # is what makes it safe to re-run, and it is also why publishing the same
+  # version twice cannot fork the tag.
+  release:
+    name: tag + GitHub release
+    needs: [lint, build]
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Tags must be present to answer "does v<version> exist already?".
+          fetch-depth: 0
+
+      - name: Read the pinned dsh version
+        id: ver
+        run: |
+          set -euo pipefail
+          version="$(grep -m1 '^DSH_VERSION=' .env.example | cut -d= -f2- | tr -d '\r')"
+          if [ -z "${version}" ]; then
+            echo '::error::no DSH_VERSION in .env.example'
+            exit 1
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Create the tag and the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.ver.outputs.version }}
+          TAG: ${{ steps.ver.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+            echo "tag ${TAG} already exists — this version was released before, nothing to do"
+            exit 0
+          fi
+
+          git config user.name  'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git tag -a "${TAG}" -m "dsh ${VERSION}" "${GITHUB_SHA}"
+          git push origin "refs/tags/${TAG}"
+
+          # GHCR rejects uppercase; GITHUB_REPOSITORY is case-preserving.
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+
+          notes="$(mktemp)"
+          {
+            echo "Image for **dsh ${VERSION}**, built from commit \`${GITHUB_SHA:0:7}\`."
+            echo
+            echo '```'
+            echo "docker pull ${image}:${VERSION}"
+            echo '```'
+            echo
+            echo '### Tags in this release'
+            echo
+            echo '| tag | meaning |'
+            echo '|---|---|'
+            echo "| \`${VERSION}\` | this dsh version, pinned |"
+            echo "| \`${VERSION}-slim\` | same version without Office / Chrome / Python, when built that way |"
+            echo '| `latest` | the newest version only — it does not move backwards |'
+            echo
+            echo '### What is inside'
+            echo
+            echo "- dsh \`${VERSION}\` on Node 24 (upstream requires >= 24.9.0 since 0.2.2)"
+            echo '- `python:3.11-slim-bookworm` base (glibc, which node-pty needs)'
+            echo '- Caddy TLS front, Landlock sandbox, three bundled plugins'
+            echo '- build-time gates: Node floor, install-tree assertion, settings-patch check, `--dump-config`, 60s boot smoke'
+            echo
+            echo 'README covers docker compose; `docs/openshift-deployment.md` covers OpenShift.'
+          } > "${notes}"
+
+          # dsh publishes release candidates, so most tags here are pre-releases.
+          # Saying so keeps GitHub from labelling an rc as the stable "Latest".
+          prerelease=''
+          case "${VERSION}" in
+            *-*) prerelease='--prerelease' ;;
+          esac
+
+          gh release create "${TAG}" \
+            --title "dsh ${VERSION}" \
+            --notes-file "${notes}" \
+            ${prerelease}
+
+      - name: Summary
+        run: |
+          {
+            echo "### release"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| tag | \`${{ steps.ver.outputs.tag }}\` |"
+            echo "| dsh version | \`${{ steps.ver.outputs.version }}\` |"
+            echo "| image | \`ghcr.io/${{ github.repository }}:${{ steps.ver.outputs.version }}\` |"
           } >> "$GITHUB_STEP_SUMMARY"

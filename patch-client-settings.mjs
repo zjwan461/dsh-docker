@@ -98,8 +98,26 @@ const FALLBACK_BUNDLES = [join('lib', 'client.browser.js'), join('lib', 'client.
  * Anchored on the whole ternary rather than on a line number, because line
  * numbers move between releases (0.1.5-rc.1 -> 0.2.1-rc.2 moved every gate) and
  * a stale line number would silently patch the wrong thing.
+ *
+ * ⚠️ EVERY OPERATOR IS `\s*`-WRAPPED ON PURPOSE. 0.2.1 shipped this expression
+ * spaced, exactly as it reads in the source:
+ *
+ *     isLoopback: transport?.ownsHost === true || pageLocation === void 0 || …
+ *
+ * 0.2.2-rc.5 ships the same expression from a tighter minifier — the semantics
+ * are unchanged, only the whitespace is gone:
+ *
+ *     isLoopback:transport?.ownsHost===true||pageLocation===void 0||…
+ *
+ * An anchor with literal spaces passed on 0.2.1 and failed on 0.2.2 with the
+ * "did not match the anchor" error at image build time. Tolerating whitespace is
+ * what makes one anchor serve both, and it does not weaken the match: the
+ * identifiers, the operators and the operand order all still have to line up.
+ *
+ * The leading `(isLoopback:\s*)` and trailing `(,)` are capture groups the
+ * replacement reuses, so the surrounding object literal stays intact.
  */
-const ANCHOR = /(isLoopback:\s*)transport\?\.ownsHost === true \|\| pageLocation === void 0 \|\| isLoopbackHostname\(pageLocation\.hostname\)(,)/g;
+const ANCHOR = /(isLoopback:\s*)transport\?\.ownsHost\s*===\s*true\s*\|\|\s*pageLocation\s*===\s*void 0\s*\|\|\s*isLoopbackHostname\(\s*pageLocation\.hostname\s*\)(,)/g;
 
 const argv = process.argv.slice(2);
 const checkOnly = argv.includes('--check');
